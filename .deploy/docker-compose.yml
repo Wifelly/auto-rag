@@ -1,0 +1,51 @@
+name: mars
+
+services:
+  auto-rag:
+    build:
+      platforms:
+        - linux/amd64
+      context: ../
+      dockerfile: .deploy/Dockerfile
+    env_file:
+      - .env
+    tty: true
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../:/app
+    restart: always
+    depends_on:
+      - otel-collector
+    develop:
+      watch:
+        - action: sync+restart
+          path: ../
+          target: /app
+          ignore:
+            - node_modules/
+            - .git/
+
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 8080 || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 2
+      start_period: 60s
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+        window: 30s
+
+  otel-collector:
+    image: otel/opentelemetry-collector:latest
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "6831:6831" # Jaeger receiver
+      - "4317:4317" # OTLP gRPC receiver
+      - "4318:4318" # OTLP HTTP receiver
+    restart: always

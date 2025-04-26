@@ -7,7 +7,7 @@ authors = [
     {name = "Sh1nttaro"}
 ]
 readme = "README.md"
-requires-python = "3.13.3"
+requires-python = ">=3.12,<3.13"
 
 dependencies = [
     "langchain (>=0.3.24,<0.4.0)",
@@ -32,7 +32,16 @@ dependencies = [
     "tiktoken (>=0.9.0,<0.10.0)",
     "rich (>=14.0.0,<15.0.0)",
     "lxml (>=5.4.0,<6.0.0)",
-    "streamlit (>=1.44.1,<2.0.0)"
+    "streamlit (>=1.44.1,<2.0.0)",
+    "fastapi[all] (>=0.115.12,<0.116.0)",
+    "opentelemetry-api (>=1.32.1,<2.0.0)",
+    "opentelemetry-sdk (>=1.32.1,<2.0.0)",
+    "opentelemetry-exporter-otlp (>=1.32.1,<2.0.0)",
+    "opentelemetry-instrumentation (>=0.53b1,<0.54)",
+    "opentelemetry-instrumentation-asgi (>=0.53b1,<0.54)",
+    "opentelemetry-exporter-otlp-proto-http (>=1.32.1,<2.0.0)",
+    "loguru (>=0.7.3,<0.8.0)",
+    "prometheus-client (>=0.21.1,<0.22.0)"
 ]
 
 [tool.poetry]
@@ -41,3 +50,160 @@ package-mode = false
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.group.dev.dependencies]
+pre-commit = "^3.6.0"
+pre-commit-hooks = "^4.5.0"
+grpcio-tools = "^1.60.1"
+
+[tool.poetry.group.lint.dependencies]
+mypy = "^1.10.1"
+ruff = "^0.5.0"
+mypy-protobuf = "^3.6.0"
+
+[tool.poetry.group.test.dependencies]
+pytest = "^7.2.0"
+pytest-asyncio = "^0.18.1"
+pytest-cov = "^4.1.0"
+pytest-dotenv = "^0.5.2"
+pytest-freezegun = "^0.4.2"
+pytest-httpx = "^0.30.0"
+
+[tool.pytest.ini_options]
+addopts = "-vv -rsx -p no:warnings --cov-fail-under=85"
+asyncio_mode = "auto"
+env_files = ["tests/.env.test"]
+
+[tool.coverage.run]
+branch = true
+omit = [
+    "service/*main*.py",
+]
+source = ["service"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "@(abc.)?abstractmethod",
+]
+
+[tool.mypy]
+check_untyped_defs = true
+disallow_any_explicit = false
+disallow_incomplete_defs = true
+disallow_untyped_decorators = true
+disallow_untyped_defs = true
+explicit_package_bases = true
+extra_checks = true
+files = ["service", "tests"]
+ignore_errors = false
+ignore_missing_imports = true
+namespace_packages = true
+no_implicit_optional = true
+no_implicit_reexport = true
+plugins = ["pydantic.mypy"]
+python_version = "3.12"
+scripts_are_modules = true
+strict_equality = true
+strict_optional = true
+warn_redundant_casts = true
+warn_unused_configs = true
+warn_unused_ignores = true
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+warn_untyped_fields = true
+
+[tool.ruff]
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "site-packages",
+    "venv",
+]
+fix = true
+indent-width = 4
+line-length = 120
+target-version = "py312"
+unsafe-fixes = true
+
+[tool.ruff.lint]
+ignore = ["UP035", "E722"]
+# Enable rules, in addition to the defaults. https://docs.astral.sh/ruff/rules
+select = [
+    "E", # pycodestyle Error
+    "W", # pycodestyle Warning
+    "F", # Pyflakes
+    "I", # isort
+    "PL", # Pylint
+    "N", # pep8-naming
+    "ARG", # flake8-unused-arguments
+    "UP", # pyupgrade
+    "B", # flake8-bugbear
+    "C4", # flake8-comprehensions
+    "ASYNC", # flake8-async
+    "S", # flake8-bandit
+    "PIE", # flake8-pie
+    "PT", # flake8-pytest-style
+    "RET", # flake8-return
+    "SIM", # flake8-simplify
+    "PTH", # flake8-use-pathlib
+    "INP", # flake8-no-pep420
+    "DTZ", # flake8-datetimez
+    "NPY", # NumPy-specific rules
+    "RUF", # Ruff-specific rules
+    "ERA", # eradicate
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Ignore rules for compiled protobuff modules
+"**/{grpc_types,generated}/*" = ["E", "N", "ARG", "PL", "UP", "F", "ERA001"]
+# Ignore bandit and other rules for tests and utils
+"{tests,utils,scripts}/*" = ["S", "PLR0913", "ARG002", "RUF001", "PLR2004", "N803"]
+# Ignore unused method argument and gRPC(PascalCase) name style for grpc Servicer
+"service/servicers/*" = ["ARG002", "N802"]
+# Ignore checks for packages that are missing an __init__.py file in triton_models and utils
+"{triton_models,utils,scripts}/*" = ["INP"]
+# Ignore Russian character checking
+"service/models/api_models.py" = ["RUF001"]
+# Ignore line too long rule
+"tests/test_api.py" = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+
+[tool.ruff.lint.pylint]
+max-args = 7
+
+[tool.ruff.lint.flake8-pytest-style]
+fixture-parentheses = false
+mark-parentheses = false
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
