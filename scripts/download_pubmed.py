@@ -59,9 +59,7 @@ def download_file(url, filepath):
                                 print(f"  Прогресс: {percent:.1f}%")
 
         elapsed = time.time() - start_time
-        print(
-            f"  Завершено за {elapsed:.1f} секунд ({os.path.getsize(filepath) / 1024 / 1024:.1f} МБ)"
-        )
+        print(f"  Завершено за {elapsed:.1f} секунд ({os.path.getsize(filepath) / 1024 / 1024:.1f} МБ)")
         return True
     except Exception as e:
         print(f"Ошибка при скачивании {os.path.basename(filepath)}: {e}")
@@ -99,17 +97,13 @@ def main():
     baseline_files = get_file_list(BASELINE_URL)
     update_files = get_file_list(UPDATE_URL)
 
-    print(
-        f"\nНайдено {len(baseline_files)} baseline файлов и {len(update_files)} update файлов."
-    )
+    print(f"\nНайдено {len(baseline_files)} baseline файлов и {len(update_files)} update файлов.")
 
     # Выбираем нужное количество файлов
     baseline_files = baseline_files[: args.baseline]
     update_files = update_files[: args.update]
 
-    print(
-        f"Будет скачано {len(baseline_files)} baseline файлов и {len(update_files)} update файлов."
-    )
+    print(f"Будет скачано {len(baseline_files)} baseline файлов и {len(update_files)} update файлов.")
 
     # Скачиваем файлы в параллельных потоках
     download_tasks = []
@@ -129,14 +123,10 @@ def main():
     # Запускаем параллельное скачивание
     success_count = 0
     with ThreadPoolExecutor(max_workers=args.threads) as executor:
-        results = list(
-            executor.map(lambda task: download_file(task[0], task[1]), download_tasks)
-        )
+        results = list(executor.map(lambda task: download_file(task[0], task[1]), download_tasks))
         success_count = sum(results)
 
-    print(
-        f"\nЗавершено! Успешно скачано {success_count} из {len(download_tasks)} файлов."
-    )
+    print(f"\nЗавершено! Успешно скачано {success_count} из {len(download_tasks)} файлов.")
     print(f"Все файлы сохранены в папке: {os.path.abspath(DOWNLOAD_DIR)}")
 
 

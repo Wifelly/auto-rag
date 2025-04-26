@@ -78,8 +78,7 @@ def run_gpt_with_fallback(query, dbs, top_k=DEFAULT_TOP_K):
                 "content": f"Используй документы ниже, чтобы ответить точнее.\n<context>{context}</context>\nВопрос: {query}",
             }
         )
-        refined_answer = call_gpt(messages)
-        return refined_answer
+        return call_gpt(messages)
     else:
         return gpt_answer
 
@@ -95,10 +94,7 @@ if __name__ == "__main__":
     if os.path.exists(DOCS_DB_DIR):
         dbs["docs"] = FAISS.load_local(DOCS_DB_DIR, embedding_model)
 
-    if len(argv) > 1:
-        query = " ".join(argv[1:])
-    else:
-        query = input("Введите вопрос: ")
+    query = " ".join(argv[1:]) if len(argv) > 1 else input("Введите вопрос: ")
 
     answer = run_gpt_with_fallback(query, dbs)
     print("\nОтвет:\n", answer)

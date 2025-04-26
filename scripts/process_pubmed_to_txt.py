@@ -62,12 +62,7 @@ def extract_text_from_pubmed_xml_gz(gz_path, output_folder):
                         in_abstract = True
 
                     # Текст абстракта (может быть с секциями)
-                    elif (
-                        in_article
-                        and in_abstract
-                        and event == "end"
-                        and tag == "AbstractText"
-                    ):
+                    elif in_article and in_abstract and event == "end" and tag == "AbstractText":
                         if elem.text:
                             label = elem.get("Label", "")
                             if label:
@@ -98,9 +93,7 @@ def extract_text_from_pubmed_xml_gz(gz_path, output_folder):
                             article_text += f"ABSTRACT: {current_article['abstract']}\n"
 
                         if current_article["keywords"]:
-                            article_text += (
-                                f"KEYWORDS: {', '.join(current_article['keywords'])}\n"
-                            )
+                            article_text += f"KEYWORDS: {', '.join(current_article['keywords'])}\n"
 
                         # Записываем статью в файл
                         out_file.write(article_text + "\n\n")
@@ -126,11 +119,7 @@ def process_pubmed_files(input_dir, output_dir, max_workers=4):
     os.makedirs(output_dir, exist_ok=True)
 
     # Получаем список всех .xml.gz файлов
-    gz_files = [
-        os.path.join(input_dir, f)
-        for f in os.listdir(input_dir)
-        if f.endswith(".xml.gz")
-    ]
+    gz_files = [os.path.join(input_dir, f) for f in os.listdir(input_dir) if f.endswith(".xml.gz")]
 
     if not gz_files:
         print(f"В директории {input_dir} не найдены .xml.gz файлы.")
@@ -144,10 +133,7 @@ def process_pubmed_files(input_dir, output_dir, max_workers=4):
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Запускаем обработку всех файлов
-        futures = [
-            executor.submit(extract_text_from_pubmed_xml_gz, gz_file, output_dir)
-            for gz_file in gz_files
-        ]
+        futures = [executor.submit(extract_text_from_pubmed_xml_gz, gz_file, output_dir) for gz_file in gz_files]
 
         # Собираем результаты
         for future in futures:
@@ -163,9 +149,7 @@ def process_pubmed_files(input_dir, output_dir, max_workers=4):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Обработка PubMed XML.GZ файлов в текстовый формат"
-    )
+    parser = argparse.ArgumentParser(description="Обработка PubMed XML.GZ файлов в текстовый формат")
     parser.add_argument(
         "--input-dir",
         default=DEFAULT_INPUT_DIR,

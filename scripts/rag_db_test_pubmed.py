@@ -23,9 +23,7 @@ class TqdmEmbeddings(Embeddings):
 
     def embed_documents(self, texts, batch_size=10):
         all_embeddings = []
-        for i in tqdm(
-            range(0, len(texts), batch_size), desc="Создание эмбеддингов", unit="батч"
-        ):
+        for i in tqdm(range(0, len(texts), batch_size), desc="Создание эмбеддингов", unit="батч"):
             batch = texts[i : i + batch_size]
             batch_embeddings = self.model.encode(batch, show_progress_bar=False)
             all_embeddings.extend(batch_embeddings)
@@ -42,7 +40,7 @@ def calculate_file_hash(file_path):
 
 def load_hashes():
     if os.path.exists(HASHES_FILE):
-        with open(HASHES_FILE, "r") as f:
+        with open(HASHES_FILE) as f:
             return json.load(f)
     return {}
 
@@ -58,24 +56,18 @@ def extract_text_from_txt_files(folder_path, max_files=None):
         return ""
 
     txt_files = [
-        f
-        for f in os.listdir(folder_path)
-        if f.endswith(".txt") and os.path.isfile(os.path.join(folder_path, f))
+        f for f in os.listdir(folder_path) if f.endswith(".txt") and os.path.isfile(os.path.join(folder_path, f))
     ]
 
     if max_files and len(txt_files) > max_files:
-        console.print(
-            f"[yellow]Ограничение:[/yellow] будет обработано {max_files} из {len(txt_files)} файлов"
-        )
+        console.print(f"[yellow]Ограничение:[/yellow] будет обработано {max_files} из {len(txt_files)} файлов")
         txt_files = txt_files[:max_files]
 
     if not txt_files:
         console.print("[yellow]В папке нет .txt файлов[/yellow]")
         return ""
 
-    console.print(
-        f"[cyan]Обработка {len(txt_files)} .txt файлов из {folder_path}[/cyan]"
-    )
+    console.print(f"[cyan]Обработка {len(txt_files)} .txt файлов из {folder_path}[/cyan]")
     full_text = ""
     current_hashes = {}
     previous_hashes = load_hashes()
@@ -90,7 +82,7 @@ def extract_text_from_txt_files(folder_path, max_files=None):
             continue
 
         try:
-            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            with open(file_path, encoding="utf-8", errors="ignore") as f:
                 full_text += f.read() + "\n\n"
             console.log(f"Обработан: {filename}")
         except Exception as e:
@@ -126,14 +118,8 @@ def create_vector_db(
     metadocs = []
 
     for i, chunk in enumerate(tqdm(chunks, desc="Подготовка документов", unit="чанк")):
-        documents.append(
-            Document(
-                page_content=chunk, metadata={"source": "pubmed_txt", "chunk_id": i}
-            )
-        )
-        metadocs.append(
-            {"title": f"PubMed Chunk {i}", "text": chunk, "source": "pubmed_txt"}
-        )
+        documents.append(Document(page_content=chunk, metadata={"source": "pubmed_txt", "chunk_id": i}))
+        metadocs.append({"title": f"PubMed Chunk {i}", "text": chunk, "source": "pubmed_txt"})
 
     if not documents:
         console.print("[red]Не удалось создать документы для индексации[/red]")
@@ -177,38 +163,24 @@ def create_vector_db(
         return True
 
     except Exception as e:
-        console.print(
-            f"[bold red]Ошибка при создании/обновлении индекса:[/bold red] {e}"
-        )
+        console.print(f"[bold red]Ошибка при создании/обновлении индекса:[/bold red] {e}")
         traceback.print_exc()
         return False
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Создание или обновление FAISS-векторной базы из текстов PubMed"
-    )
-    parser.add_argument(
-        "--input-dir", default="pubmed_txt", help="Папка с .txt файлами"
-    )
-    parser.add_argument(
-        "--output-dir", default="pubmed_db_index", help="Папка для сохранения индекса"
-    )
-    parser.add_argument(
-        "--chunk-size", type=int, default=1024, help="Размер чанка в символах"
-    )
-    parser.add_argument(
-        "--chunk-overlap", type=int, default=200, help="Перекрытие между чанками"
-    )
+    parser = argparse.ArgumentParser(description="Создание или обновление FAISS-векторной базы из текстов PubMed")
+    parser.add_argument("--input-dir", default="pubmed_txt", help="Папка с .txt файлами")
+    parser.add_argument("--output-dir", default="pubmed_db_index", help="Папка для сохранения индекса")
+    parser.add_argument("--chunk-size", type=int, default=1024, help="Размер чанка в символах")
+    parser.add_argument("--chunk-overlap", type=int, default=200, help="Перекрытие между чанками")
     parser.add_argument(
         "--model",
         default="sentence-transformers/all-MiniLM-L6-v2",
         help="Модель эмбеддингов",
     )
     parser.add_argument("--max-files", type=int, help="Ограничить количество файлов")
-    parser.add_argument(
-        "--append", action="store_true", help="Добавить к существующему индексу"
-    )
+    parser.add_argument("--append", action="store_true", help="Добавить к существующему индексу")
 
     args = parser.parse_args()
 
@@ -217,9 +189,7 @@ def main():
     text = extract_text_from_txt_files(args.input_dir, args.max_files)
 
     if text:
-        console.print(
-            f"Объём нового текста: {len(text)} символов (~{len(text.split())} слов)"
-        )
+        console.print(f"Объём нового текста: {len(text)} символов (~{len(text.split())} слов)")
         create_vector_db(
             text=text,
             output_dir=args.output_dir,
@@ -229,9 +199,7 @@ def main():
             append=args.append,
         )
     else:
-        console.print(
-            "[bold yellow]Нечего индексировать. Все файлы уже обработаны.[/bold yellow]"
-        )
+        console.print("[bold yellow]Нечего индексировать. Все файлы уже обработаны.[/bold yellow]")
 
 
 if __name__ == "__main__":

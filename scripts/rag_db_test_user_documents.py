@@ -25,7 +25,7 @@ def calculate_file_hash(file_path):
 
 def load_hashes():
     if os.path.exists(HASHES_FILE):
-        with open(HASHES_FILE, "r") as f:
+        with open(HASHES_FILE) as f:
             return json.load(f)
     return {}
 
@@ -107,9 +107,7 @@ def extract_texts_with_hash_check(folder_path):
     return full_text
 
 
-def create_search_db(
-    file_text, knowledge_base_link, chunk_size=1024, chunk_overlap=200, append=True
-):
+def create_search_db(file_text, knowledge_base_link, chunk_size=1024, chunk_overlap=200, append=True):
     if not file_text.strip():
         console.log("[yellow]Нет новых или изменённых файлов для обработки.[/yellow]")
         return
@@ -128,9 +126,7 @@ def create_search_db(
         TextColumn("[progress.description]{task.description}"),
         transient=True,
     ) as progress:
-        task = progress.add_task(
-            "[cyan]Создание чанков документа...", total=len(chunks)
-        )
+        task = progress.add_task("[cyan]Создание чанков документа...", total=len(chunks))
         for chunkID, chunk in enumerate(chunks):
             source_chunks.append(
                 Document(
@@ -146,9 +142,7 @@ def create_search_db(
 
     console.log(f"[green]Создано чанков: {len(source_chunks)}[/green]")
 
-    embedding_model = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
+    embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
     if append and os.path.exists(os.path.join(INDEX_DIR, "index.faiss")):
         console.log("[yellow]Загрузка существующего индекса FAISS...[/yellow]")

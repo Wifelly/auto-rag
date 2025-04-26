@@ -18,9 +18,7 @@ API_KEY = os.getenv(
 )
 
 if not API_KEY:
-    raise ValueError(
-        "API_KEY не задан. Укажи API-ключ в коде или через переменную окружения."
-    )
+    raise ValueError("API_KEY не задан. Укажи API-ключ в коде или через переменную окружения.")
 
 
 def load_vector_db(db_dir, model_name=DEFAULT_MODEL):
@@ -121,9 +119,7 @@ def search_similar_docs(query, databases, top_k=DEFAULT_TOP_K):
                     break
 
                 additional = min(remaining, results_per_db)
-                db_results = search_in_db(
-                    query, db, results_per_db + additional, db_name
-                )
+                db_results = search_in_db(query, db, results_per_db + additional, db_name)
                 # Берем только новые результаты (которых нет в per_db_results)
                 new_results = db_results[len(per_db_results[db_name]) :]
                 all_results.extend(new_results)
@@ -177,11 +173,7 @@ def run_gpt_query(system_prompt, user_query, databases, top_k=DEFAULT_TOP_K):
         sources_info.append(source_info)
 
         print(f"\nИсточник #{i+1}: [{source_db}] {source} (чанк {chunk_id})")
-        content_preview = (
-            doc.page_content[:150] + "..."
-            if len(doc.page_content) > 150
-            else doc.page_content
-        )
+        content_preview = doc.page_content[:150] + "..." if len(doc.page_content) > 150 else doc.page_content
         print(f"Содержание: {content_preview}")
 
     print("-----")
@@ -234,14 +226,11 @@ def run_gpt_query(system_prompt, user_query, databases, top_k=DEFAULT_TOP_K):
         gpt_response = response_data["choices"][0]["message"]["content"]
 
         # Добавляем информацию о реальных источниках
-        response_with_sources = (
-            gpt_response + "\n\n" + format_sources_info(sources_info)
-        )
+        return gpt_response + "\n\n" + format_sources_info(sources_info)
 
-        return response_with_sources
     except Exception as e:
         print(f"Ошибка при обращении к API: {e}")
-        return f"Ошибка: {str(e)}"
+        return f"Ошибка: {e!s}"
 
 
 def format_sources_info(sources_info):
@@ -285,9 +274,7 @@ def format_result(doc, index, max_content_length=1000):
 
 def main():
     """Основная функция скрипта."""
-    parser = argparse.ArgumentParser(
-        description="Поиск по векторным базам с возможностью ответов от GPT"
-    )
+    parser = argparse.ArgumentParser(description="Поиск по векторным базам с возможностью ответов от GPT")
     parser.add_argument("query", type=str, nargs="?", help="Поисковый запрос")
     parser.add_argument(
         "--model",
@@ -301,12 +288,8 @@ def main():
         default=DEFAULT_TOP_K,
         help=f"Количество результатов для вывода (по умолчанию: {DEFAULT_TOP_K})",
     )
-    parser.add_argument(
-        "--no-gpt", action="store_true", help="Только поиск без запроса к GPT"
-    )
-    parser.add_argument(
-        "--use-pubmed", action="store_true", help="Использовать только базу PubMed"
-    )
+    parser.add_argument("--no-gpt", action="store_true", help="Только поиск без запроса к GPT")
+    parser.add_argument("--use-pubmed", action="store_true", help="Использовать только базу PubMed")
     parser.add_argument(
         "--use-docs",
         action="store_true",
@@ -330,9 +313,7 @@ def main():
         use_docs = True
 
     # Загружаем векторные базы
-    databases, _ = load_all_vector_dbs(
-        args.model, use_pubmed=use_pubmed, use_docs=use_docs
-    )
+    databases, _ = load_all_vector_dbs(args.model, use_pubmed=use_pubmed, use_docs=use_docs)
 
     if not databases:
         return
@@ -383,9 +364,7 @@ def main():
 
     else:
         # Нет запроса
-        print(
-            "\nУкажите поисковый запрос в аргументах или используйте интерактивный режим"
-        )
+        print("\nУкажите поисковый запрос в аргументах или используйте интерактивный режим")
         print("Пример: python rag_db_search.py 'ваш запрос'")
         print("      или python rag_db_search.py --interactive")
         print("\nДоступные флаги:")

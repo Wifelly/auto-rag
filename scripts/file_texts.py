@@ -69,9 +69,7 @@ def preview_and_save_documents(folder_path, output_folder):
                 f.write(text)
             console.log(f"[cyan]Текст сохранён в:[/cyan] {output_path}")
         else:
-            console.print(
-                "[italic yellow]Файл не содержит текста или не удалось извлечь содержимое.[/italic]"
-            )
+            console.print("[italic yellow]Файл не содержит текста или не удалось извлечь содержимое.[/italic]")
 
 
 if __name__ == "__main__":
