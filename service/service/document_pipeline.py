@@ -5,15 +5,16 @@ from langchain.docstore.document import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 
-from embeddings import EmbeddingModel, DEFAULT_MODEL_NAME
-from utils import Utils, SUPPORTED_EXTENSIONS, MAX_TEXT_SIZE
-from logger import logger
+from embedding import EmbeddingModel, DEFAULT_MODEL_NAME
+from service.utils import Utils, SUPPORTED_EXTENSIONS, MAX_TEXT_SIZE
+from models.embedding.embedding import EmbeddingModel, DEFAULT_MODEL_NAME
+from service.logger import logger
 
 class DocumentPipeline:
     def __init__(self, model_name: str = DEFAULT_MODEL_NAME, knowledge_base_link: str = "user_documents_kb", hashes_file: str = "file_hashes_user_docs.json"):
         self.embeddings = EmbeddingModel(model_name=model_name)
         self.knowledge_base_link = knowledge_base_link
-        Utils.hashes_file = hashes_file
+        self.utils = Utils(hashes_file=hashes_file)
 
     async def extract_texts_with_hash_check(self, folder_path: str, max_files: int = None) -> (str, dict):
         if not os.path.isdir(folder_path):
@@ -31,19 +32,19 @@ class DocumentPipeline:
         if max_files:
             files = files[:max_files]
 
-        previous_hashes = Utils.load_hashes()
+        previous_hashes = self.utils.load_hashes()
         current_hashes = {}
         extracted_texts = []
 
         for filename in files:
             file_path = os.path.join(folder_path, filename)
-            file_hash = Utils.calculate_file_hash(file_path)
+            file_hash = self.utils.calculate_file_hash(file_path)
             current_hashes[filename] = file_hash
 
             if previous_hashes.get(filename) == file_hash:
                 logger.info(f"Пропущено {filename} (без изменений)")
             else:
-                text = await Utils.extract_text(file_path)
+                text = await self.utils.extract_text(file_path)
                 if text.strip():
                     extracted_texts.append(text)
 
@@ -62,12 +63,12 @@ class DocumentPipeline:
         success = await self.create_vector_db(text, output_dir, chunk_size, chunk_overlap, append)
 
         if success:
-            Utils.save_hashes(current_hashes)
+            self.utils.save_hashes(current_hashes)
 
         return success
 
     async def create_vector_db(self, text: str, output_dir: str, chunk_size: int = 1024, chunk_overlap: int = 200, append: bool = False) -> bool:
-        text = Utils.clean_text(text)
+        text = self.utils.clean_text(text)
 
         splitter = RecursiveCharacterTextSplitter(
             separators=["\n\n", "\n", " "],
