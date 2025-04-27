@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from opentelemetry.instrumentation.asgi import OpenTelemetryMiddleware
 
+from service.database.init_db import init_database
 from service.middlewares import (
     ErrorHandlerMiddleware,
     LoggingMiddleware,
@@ -11,7 +12,7 @@ from service.middlewares import (
 )
 from service.monitoring.metrics import configure_metrics
 from service.monitoring.tracing import setup_tracer
-from service.routes import health_router, metrics_router
+from service.routes import health_router, metrics_router, embeddings
 from service.settings import get_settings
 
 
@@ -19,6 +20,7 @@ from service.settings import get_settings
 async def lifespan(app: FastAPI) -> None:
     settings = get_settings()
     configure_metrics(settings)
+    await init_database()
     yield
 
 
@@ -36,7 +38,7 @@ def get_application() -> FastAPI:
 
     application.include_router(health_router, tags=["Health"])
     application.include_router(metrics_router, tags=["Metrics"])
-
+    application.include_router(embeddings.router, prefix="/api/v1", tags=["Embeddings"])
     return application
 
 

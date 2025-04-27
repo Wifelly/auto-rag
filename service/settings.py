@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     jaeger: TracingSettings = Field(default_factory=TracingSettings)
     metrics_server_port: int = Field(default=8000)
 
+    DATABASE_URL: str = "postgresql+asyncpg://user:password@postgres:5432/embeddings_db"
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
