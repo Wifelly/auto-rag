@@ -6,8 +6,8 @@ from typing import Dict, Optional, List
 from langchain_community.vectorstores import FAISS
 from langchain.docstore.document import Document
 
-from embeddings import EmbeddingModel, DEFAULT_MODEL_NAME
-from logger import logger
+from models.embedding.embedding import EmbeddingModel, DEFAULT_MODEL_NAME
+from service.monitoring.logger import logger
 
 class EmbeddingManager:
     def __init__(self, base_dir: str = "saved_indexes", model_name: str = DEFAULT_MODEL_NAME):
