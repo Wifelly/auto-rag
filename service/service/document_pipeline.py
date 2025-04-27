@@ -8,7 +8,7 @@ from langchain_community.vectorstores import FAISS
 from embedding import EmbeddingModel, DEFAULT_MODEL_NAME
 from service.utils import Utils, SUPPORTED_EXTENSIONS, MAX_TEXT_SIZE
 from models.embedding.embedding import EmbeddingModel, DEFAULT_MODEL_NAME
-from service.logger import logger
+from service.monitoring.logger import logger
 
 class DocumentPipeline:
     def __init__(self, model_name: str = DEFAULT_MODEL_NAME, knowledge_base_link: str = "user_documents_kb", hashes_file: str = "file_hashes_user_docs.json"):
