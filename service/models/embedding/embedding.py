@@ -1,0 +1,39 @@
+# --- embeddings.py ---
+
+import torch
+from transformers import AutoTokenizer, AutoModel
+from langchain.embeddings.base import Embeddings as BaseEmbeddings
+from tqdm import tqdm
+
+DEFAULT_MODEL_NAME = "intfloat/multilingual-e5-large"
+
+class EmbeddingModel(BaseEmbeddings):
+    def __init__(self, model_name: str = DEFAULT_MODEL_NAME, device: str = None):
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+            self.model = AutoModel.from_pretrained(model_name).to(self.device)
+        except Exception as e:
+            raise RuntimeError(f"Ошибка загрузки модели эмбеддингов '{model_name}': {e}")
+
+    def embed_documents(self, texts, batch_size=10):
+        all_embeddings = []
+        for i in tqdm(range(0, len(texts), batch_size), desc="Эмбеддинг батчей", unit="батч"):
+            batch = texts[i:i + batch_size]
+            inputs = self.tokenizer(batch, padding=True, truncation=True, return_tensors="pt").to(self.device)
+            with torch.no_grad():
+                model_output = self.model(**inputs)
+            embeddings = self._mean_pooling(model_output, inputs["attention_mask"])
+            all_embeddings.extend(embeddings.cpu().numpy())
+        return all_embeddings
+
+    def embed_query(self, text):
+        return self.embed_documents([text])[0]
+
+    @staticmethod
+    def _mean_pooling(model_output, attention_mask):
+        token_embeddings = model_output.last_hidden_state
+        input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+        sum_embeddings = torch.sum(token_embeddings * input_mask_expanded, 1)
+        sum_mask = torch.clamp(input_mask_expanded.sum(1), min=1e-9)
+        return sum_embeddings / sum_mask
