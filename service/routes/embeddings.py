@@ -10,13 +10,14 @@ router = APIRouter()
 
 class EmbeddingCreate(BaseModel):
     name: str
-    status_id: int
     vector_db_path: str
+    status_id: int
 
 
 class EmbeddingResponse(BaseModel):
     id: int
     name: str
+    vector_db_path: str
     status_id: int
 
     class Config:
