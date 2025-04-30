@@ -6,7 +6,7 @@ from pathlib import Path
 from langchain.docstore.document import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from models.embedding.embedding import DEFAULT_MODEL_NAME, EmbeddingModel
+from service.models.embedding.embedding import DEFAULT_MODEL_NAME, EmbeddingModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from service.monitoring.logger import logger
@@ -81,6 +81,7 @@ class DocumentPipeline:
         max_files: int | None = None,
         append: bool = False,
         db: AsyncSession | None = None,
+        embedding_id: int | None = None
     ) -> bool:
         await self._load_embeddings()
 
@@ -102,7 +103,12 @@ class DocumentPipeline:
         self.utils.save_hashes(current_hashes)
 
         if db and extracted_filenames:
-            return await self._save_embedding_to_db(db, extracted_filenames, output_dir)
+                return await self._save_embedding_to_db(
+                    db=db,
+                    filenames=extracted_filenames,
+                    output_dir=output_dir,
+                    embedding_id=embedding_id
+                    )
 
         return True
 
@@ -154,9 +160,29 @@ class DocumentPipeline:
             logger.error(f"Error creating/updating FAISS index: {e}")
             return False
 
-    async def _save_embedding_to_db(self, db: AsyncSession, filenames: list[str], output_dir: str) -> bool:
+    async def _save_embedding_to_db(
+        self, 
+        db: AsyncSession, 
+        filenames: list[str], 
+        output_dir: str,
+        embedding_id: int | None = None
+        ) -> bool:
         try:
             embedding_service = EmbeddingService(db)
+
+            if embedding_id is not None:
+                embedding = await embedding_service.get_embedding_by_id(embedding_id)
+                if embedding:
+                    embedding.files = filenames
+                    embedding.vector_db_path = str(Path(output_dir) / "index.faiss")
+                    await db.commit()
+                    await db.refresh(embedding)
+                    logger.info(f"Файлы и путь обновлены у embedding #{embedding_id}")
+                    return True
+                else:
+                    logger.error(f"Embedding с ID={embedding_id} не найден для обновления.")
+                    return False
+
             embedding = await embedding_service.create_embedding(
                 name=f"embedding_{datetime.now(tz=UTC).strftime('%Y%m%d_%H%M%S')}",
                 files=filenames,
@@ -167,6 +193,7 @@ class DocumentPipeline:
                 logger.error("Failed to save embedding to the database.")
                 return False
             return True
+
         except Exception as e:
             logger.error(f"Error saving embedding to the database: {e}")
             return False
