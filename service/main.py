@@ -11,8 +11,9 @@ from service.middlewares import (
     RequestBodyMiddleware,
 )
 from service.monitoring.metrics import configure_metrics
+from service.monitoring.status import router as status_router
 from service.monitoring.tracing import setup_tracer
-from service.routes import health_router, metrics_router, embeddings
+from service.routes import chat_router, embeddings, health_router, metrics_router, rags
 from service.settings import get_settings
 
 
@@ -21,6 +22,7 @@ async def lifespan(app: FastAPI) -> None:
     settings = get_settings()
     configure_metrics(settings)
     await init_database()
+
     yield
 
 
@@ -39,6 +41,10 @@ def get_application() -> FastAPI:
     application.include_router(health_router, tags=["Health"])
     application.include_router(metrics_router, tags=["Metrics"])
     application.include_router(embeddings.router, prefix="/api/v1", tags=["Embeddings"])
+    application.include_router(rags.router, prefix="/api/v1", tags=["RAG"])
+    application.include_router(chat_router, prefix="/api/v1", tags=["Chat"])
+    application.include_router(status_router, prefix="/status", tags=["Status"])
+
     return application
 
 
