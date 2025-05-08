@@ -1,17 +1,14 @@
-# --- document_pipeline.py ---
-
 from pathlib import Path
 
 from fastapi import UploadFile
 from langchain.docstore.document import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from service.models.embedding.embedding import DEFAULT_MODEL_NAME, EmbeddingModel
 from service.monitoring.logger import logger
 from service.services.embedding_service import EmbeddingService
-from service.services.utils import MAX_TEXT_SIZE, Utils
+from service.services.utils import MAX_TEXT_SIZE, CustomMedicalTextSplitter, Utils
 
 MAX_ALLOWED_CHUNKS = 50000
 
@@ -30,20 +27,31 @@ class DocumentPipeline:
     async def train_from_uploaded_files(
         self,
         files: list[UploadFile],
-        output_dir: str,
         db: AsyncSession,
         embedding_id: int,
-        chunk_size: int = 1024,
-        chunk_overlap: int = 200,
+        chunk_size: int = 500,
+        chunk_overlap: int = 100,
+        append: bool = False,
     ) -> bool:
         await self._load_embeddings()
         embedding_service = EmbeddingService(db)
+
+        embedding = await embedding_service.get_embedding_by_id(embedding_id)
+        if not embedding:
+            logger.error(f"[FAISS] Embedding с id={embedding_id} не найден.")
+            return False
+
+        faiss_file = Path(embedding.vector_db_path + ".faiss")
+        pkl_file = Path(embedding.vector_db_path + ".pkl")
+        uid = Path(embedding.vector_db_path).name
 
         await embedding_service.update_embedding_status(embedding_id, 2)
 
         documents: list[Document] = []
         filenames: list[str] = []
         total_text_size = 0
+
+        splitter = CustomMedicalTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
 
         for file in files:
             content = await file.read()
@@ -61,18 +69,24 @@ class DocumentPipeline:
 
                 filenames.append(file.filename)
 
-                chunks = RecursiveCharacterTextSplitter(
-                    separators=["\n\n", "\n", " "],
-                    chunk_size=chunk_size,
-                    chunk_overlap=chunk_overlap,
-                ).split_text(text)
-
+                chunks = splitter.split(text)
                 if len(chunks) > MAX_ALLOWED_CHUNKS:
                     logger.warning(f"Файл {file.filename} дал слишком много чанков: {len(chunks)}")
                     continue
 
                 for i, chunk in enumerate(chunks):
-                    documents.append(Document(page_content=chunk, metadata={"chunk_id": i, "source": file.filename}))
+                    documents.append(
+                        Document(
+                            page_content=chunk,
+                            metadata={
+                                "chunk_id": i,
+                                "source_file": file.filename,
+                                "filename": file.filename,
+                                "path": file.filename,
+                                "source": file.filename,
+                            },
+                        )
+                    )
 
             except Exception as e:
                 logger.error(f"Ошибка обработки файла {file.filename}: {e}")
@@ -82,16 +96,44 @@ class DocumentPipeline:
             return False
 
         try:
-            path = Path(output_dir)
-            path.mkdir(parents=True, exist_ok=True)
+            logger.info(f"[FAISS] Обработка embedding_id={embedding_id}, файлы: {filenames}")
+            new_db = FAISS.from_documents(documents, self.embeddings)
+            logger.info(f"[FAISS] Новый индекс содержит {len(documents)} чанков.")
 
-            db = FAISS.from_documents(documents, self.embeddings)
-            db.save_local(str(path))
+            if append and faiss_file.exists():
+                logger.info(f"[FAISS] Режим: append. Загрузка существующего индекса: {faiss_file.name}")
+                existing_db = FAISS.load_local(
+                    "saved_indexes", self.embeddings, index_name=uid, allow_dangerous_deserialization=True
+                )
+
+                existing_count = len(existing_db.docstore._dict)
+                logger.info(f"[FAISS] Существующий индекс до merge: {existing_count} чанков")
+
+                existing_db.merge_from(new_db)
+
+                after_merge_count = len(existing_db.docstore._dict)
+                logger.info(f"[FAISS] После merge: {after_merge_count} чанков")
+
+                existing_db.save_local("saved_indexes", index_name=uid)
+            else:
+                logger.info("[FAISS] Режим: overwrite. Создание нового индекса.")
+                new_db.save_local("saved_indexes", index_name=uid)
+
+            logger.info(f"[FAISS] Сохранён индекс: {faiss_file.name}, embedding_id={embedding_id}, path={faiss_file}")
+
         except Exception as e:
-            logger.error(f"Ошибка при создании FAISS индекса: {e}")
+            logger.exception(f"[FAISS] Ошибка при создании индекса для embedding_id={embedding_id}: {e}")
             await embedding_service.update_embedding_status(embedding_id, 4)
             return False
 
-        await embedding_service.update_embedding_metadata(embedding_id, filenames, f"{output_dir}/index.faiss")
+        existing_files = embedding.files or []
+        combined_files = list(set(existing_files + filenames))
+
+        await embedding_service.update_embedding_metadata(
+            embedding_id=embedding_id,
+            files=combined_files,
+            vector_db_path=embedding.vector_db_path,
+            index_uid=uid,
+        )
         await embedding_service.update_embedding_status(embedding_id, 3)
         return True
