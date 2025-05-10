@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,14 +11,16 @@ from service.services.embedding_container import embedding_manager
 from service.services.embedding_service import EmbeddingService
 from service.services.tasks import train_task
 
-router = APIRouter(tags=["Embeddings"])
+router = APIRouter(prefix="/embeddings", tags=["Embeddings"])
 
 
 class EmbeddingResponse(BaseModel):
     id: int
     name: str
     vector_db_path: str
+    index_uid: str
     status_id: int
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -28,7 +30,7 @@ class SearchRequest(BaseModel):
     min_score: float = 0.0
 
 
-@router.post("/embeddings/", response_model=EmbeddingResponse)
+@router.post("/", response_model=EmbeddingResponse)
 async def create_embedding(
     user_id: int = Form(...),
     name: str = Form(...),
@@ -37,38 +39,28 @@ async def create_embedding(
     chunk_overlap: int = Form(200),
     db: AsyncSession = Depends(get_db),
 ):
-    filenames = [file.filename for file in files]
-    embedding_service = EmbeddingService(db)
-
+    filenames = [f.filename for f in files]
+    svc = EmbeddingService(db)
     try:
-        embedding = await embedding_service.create_embedding(
-            user_id=user_id,
-            name=name,
-            files=filenames,
-            status_id=1,
-        )
-
+        emb = await svc.create_embedding(user_id, name, filenames, status_id=1)
         pipeline = DocumentPipeline()
         success = await pipeline.train_from_uploaded_files(
             files=files,
-            embedding_id=embedding.id,
+            db=db,
+            embedding_id=emb.id,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
-            db=db,
             append=False,
         )
-
         if not success:
-            raise HTTPException(status_code=500, detail="Обработка и обучение не выполнены.")
-
-        return embedding
-
+            raise HTTPException(500, "Обработка и обучение не выполнены")
+        return emb
     except Exception as e:
-        logger.exception(f"[CREATE EMBEDDING] Ошибка при создании: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка при создании эмбеддинга: {e!s}")
+        logger.exception(f"[CREATE EMBEDDING] {e}")
+        raise HTTPException(500, f"Ошибка при создании эмбеддинга: {e}")
 
 
-@router.post("/embeddings/{embedding_id}/append", response_model=EmbeddingResponse)
+@router.post("/{embedding_id}/append", response_model=EmbeddingResponse)
 async def append_to_embedding(
     embedding_id: int,
     user_id: int = Form(...),
@@ -77,87 +69,68 @@ async def append_to_embedding(
     chunk_overlap: int = Form(200),
     db: AsyncSession = Depends(get_db),
 ):
-    filenames = [file.filename for file in files]
-    embedding_service = EmbeddingService(db)
-
-    embedding = await embedding_service.get_embedding_by_id(embedding_id)
-    if not embedding:
-        raise HTTPException(status_code=404, detail="Embedding не найден")
-
-    if embedding.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Доступ запрещён: чужой embedding")
-
-    if embedding.status_id != 3:
-        raise HTTPException(status_code=400, detail="Нельзя дозаписать: индекс не готов (status_id != 3)")
-
-    faiss_file = Path(embedding.vector_db_path + ".faiss")
-    if not faiss_file.exists():
-        raise HTTPException(status_code=400, detail=f"Файлы индекса не найдены по пути {faiss_file}")
-
-    try:
-        logger.info(f"[APPEND] embedding_id={embedding_id}, user_id={user_id}, файлы: {filenames}")
-        pipeline = DocumentPipeline()
-        success = await pipeline.train_from_uploaded_files(
-            files=files,
-            embedding_id=embedding_id,
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            db=db,
-            append=True,
-        )
-        if not success:
-            raise HTTPException(status_code=500, detail="Дозапись в индекс не удалась")
-
-        return embedding
-
-    except Exception as e:
-        logger.exception(f"[APPEND] Ошибка при дозаписи в embedding_id={embedding_id}")
-        raise HTTPException(status_code=500, detail=f"Ошибка при дозаписи: {e}")
+    svc = EmbeddingService(db)
+    emb = await svc.get_embedding_by_id(embedding_id)
+    if not emb:
+        raise HTTPException(404, "Embedding не найден")
+    if emb.user_id != user_id:
+        raise HTTPException(403, "Доступ запрещён")
+    if emb.status_id != 3:
+        raise HTTPException(400, "Индекс не готов")
+    base = Path("saved_indexes")
+    if not (base / f"{emb.index_uid}.faiss").exists():
+        raise HTTPException(400, "Индексный файл не найден")
+    pipeline = DocumentPipeline()
+    success = await pipeline.train_from_uploaded_files(
+        files=files,
+        db=db,
+        embedding_id=embedding_id,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        append=True,
+    )
+    if not success:
+        raise HTTPException(500, "Дозапись не выполнена")
+    return emb
 
 
-@router.get("/embeddings/{embedding_id}", response_model=EmbeddingResponse)
-async def get_embedding(embedding_id: int, db: AsyncSession = Depends(get_db)):
-    embedding_service = EmbeddingService(db)
-    embedding = await embedding_service.get_embedding_by_id(embedding_id)
-    if embedding is None:
-        raise HTTPException(status_code=404, detail="Embedding not found")
-    return embedding
+@router.get("/", response_model=list[EmbeddingResponse])
+async def list_embeddings(
+    user_id: int = Query(...),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1),
+    db: AsyncSession = Depends(get_db),
+):
+    svc = EmbeddingService(db)
+    return await svc.get_all_embeddings(user_id=user_id, skip=skip, limit=limit)
 
 
-@router.get("/embeddings/", response_model=list[EmbeddingResponse])
-async def list_embeddings(skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db)):
-    embedding_service = EmbeddingService(db)
-    return await embedding_service.get_all_embeddings(skip=skip, limit=limit)
-
-
-@router.delete("/embeddings/{embedding_id}")
+@router.delete("/{embedding_id}")
 async def delete_embedding(embedding_id: int, db: AsyncSession = Depends(get_db)):
-    embedding_service = EmbeddingService(db)
-    success = await embedding_service.delete_embedding(embedding_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Embedding not found")
-    return {"message": "Embedding deleted successfully"}
+    svc = EmbeddingService(db)
+    if not await svc.delete_embedding(embedding_id):
+        raise HTTPException(404, "Не найдено")
+    return {"message": "Deleted"}
 
 
-@router.post("/restore-embedding/{embedding_id}")
+@router.post("/restore/{embedding_id}")
 async def restore_embedding(embedding_id: int, db: AsyncSession = Depends(get_db)):
-    service = EmbeddingService(db)
-    success = await service.restore_embedding(embedding_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Embedding not found or already active")
-    return {"success": True, "message": f"Embedding {embedding_id} восстановлен"}
+    svc = EmbeddingService(db)
+    if not await svc.restore_embedding(embedding_id):
+        raise HTTPException(404, "Не найдено или уже активно")
+    return {"message": "Restored"}
 
 
-@router.put("/embeddings/{embedding_id}/status/{status_id}", response_model=EmbeddingResponse)
-async def update_embedding_status(embedding_id: int, status_id: int, db: AsyncSession = Depends(get_db)):
-    embedding_service = EmbeddingService(db)
-    embedding = await embedding_service.update_embedding_status(embedding_id, status_id)
-    if embedding is None:
-        raise HTTPException(status_code=404, detail="Embedding not found")
-    return embedding
+@router.put("/{embedding_id}/status/{status_id}", response_model=EmbeddingResponse)
+async def update_status(embedding_id: int, status_id: int, db: AsyncSession = Depends(get_db)):
+    svc = EmbeddingService(db)
+    emb = await svc.update_embedding_status(embedding_id, status_id)
+    if not emb:
+        raise HTTPException(404, "Не найдено")
+    return emb
 
 
-@router.post("/embeddings/train")
+@router.post("/train")
 async def train_embedding(
     background_tasks: BackgroundTasks,
     user_docs_dir: str,
@@ -171,83 +144,56 @@ async def train_embedding(
 ):
     background_tasks.add_task(
         train_task,
-        user_docs_dir=user_docs_dir,
-        output_dir=output_dir,
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        max_files=max_files,
-        append=append,
-        embedding_id=embedding_id,
-        db=db,
+        user_docs_dir,
+        output_dir,
+        chunk_size,
+        chunk_overlap,
+        max_files,
+        append,
+        embedding_id,
+        db,
     )
-    return {"message": "Процесс обучения запущен в фоне."}
+    return {"message": "Запущено"}
 
 
-@router.post("/embeddings/{embedding_id}/load")
-async def load_embedding_to_memory(embedding_id: int, db: AsyncSession = Depends(get_db)):
-    service = EmbeddingService(db)
-    embedding = await service.get_embedding_by_id(embedding_id)
-
-    if embedding is None:
-        raise HTTPException(status_code=404, detail="Embedding not found")
-    if embedding.status_id != 3:
-        raise HTTPException(status_code=400, detail="Embedding is not yet trained")
-    if not embedding.vector_db_path:
-        raise HTTPException(status_code=400, detail="vector_db_path не задан")
-
+@router.post("/{embedding_id}/load")
+async def load_embedding(embedding_id: int, db: AsyncSession = Depends(get_db)):
+    svc = EmbeddingService(db)
+    emb = await svc.get_embedding_by_id(embedding_id)
+    if not emb or not emb.index_uid:
+        raise HTTPException(404, "Не найдено")
     try:
-        logger.info(f"[LOAD] Загрузка FAISS: path={embedding.vector_db_path}")
-        embedding_manager.load_embedding(embedding.vector_db_path)
+        embedding_manager.load_embedding(emb.index_uid)
     except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=f"Файлы индекса не найдены: {e}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ошибка загрузки FAISS индекса: {e}")
-
-    return {"message": f"Embedding {embedding_id} успешно загружен в память."}
+        raise HTTPException(404, str(e))
+    return {"message": "Загружен"}
 
 
-@router.post("/embeddings/{embedding_id}/unload")
-async def unload_embedding_from_memory(embedding_id: int, db: AsyncSession = Depends(get_db)):
-    service = EmbeddingService(db)
-    embedding = await service.get_embedding_by_id(embedding_id)
-    if not embedding:
-        raise HTTPException(status_code=404, detail="Embedding not found")
-
-    embedding_manager.unload_embedding(embedding.vector_db_path)
-    return {"message": f"Embedding {embedding_id} успешно выгружен из памяти."}
-
-
-@router.post("/embeddings/{embedding_id}/search")
-async def search_embedding(embedding_id: int, request: SearchRequest, db: AsyncSession = Depends(get_db)):
-    service = EmbeddingService(db)
-    embedding = await service.get_embedding_by_id(embedding_id)
-    if not embedding:
-        raise HTTPException(status_code=404, detail="Embedding not found")
-
-    index_uid = Path(embedding.vector_db_path).name
-    if index_uid not in embedding_manager.get_loaded_embeddings():
-        raise HTTPException(status_code=400, detail="Embedding не загружен в память")
-
-    results = embedding_manager.search(
-        vector_db_path=embedding.vector_db_path,
-        query=request.query,
-        top_k=request.top_k,
-        min_score=request.min_score,
-    )
-
-    if results is None:
-        raise HTTPException(status_code=500, detail="Ошибка во время поиска")
-
-    return results
+@router.post("/{embedding_id}/unload")
+async def unload_embedding(embedding_id: int, db: AsyncSession = Depends(get_db)):
+    svc = EmbeddingService(db)
+    emb = await svc.get_embedding_by_id(embedding_id)
+    if not emb or not emb.index_uid:
+        raise HTTPException(404, "Не найдено")
+    embedding_manager.unload_embedding(emb.index_uid)
+    return {"message": "Выгружен"}
 
 
-@router.post("/embeddings/{embedding_id}/set-public")
-async def set_embedding_public(embedding_id: int, is_public: bool, db: AsyncSession = Depends(get_db)):
-    service = EmbeddingService(db)
-    embedding = await service.get_embedding_by_id(embedding_id)
-    if not embedding:
-        raise HTTPException(status_code=404, detail="Embedding не найден")
+@router.post("/{embedding_id}/search")
+async def search_embedding(embedding_id: int, req: SearchRequest, db: AsyncSession = Depends(get_db)):
+    svc = EmbeddingService(db)
+    emb = await svc.get_embedding_by_id(embedding_id)
+    if not emb or not emb.index_uid:
+        raise HTTPException(404, "Не найдено")
+    return embedding_manager.search(emb.index_uid, req.query, top_k=req.top_k, min_score=req.min_score)
 
-    embedding.is_public = is_public
+
+@router.post("/{embedding_id}/set-public")
+async def set_public(embedding_id: int, is_public: bool, db: AsyncSession = Depends(get_db)):
+    svc = EmbeddingService(db)
+    emb = await svc.get_embedding_by_id(embedding_id)
+    if not emb:
+        raise HTTPException(404, "Не найдено")
+    emb.is_public = is_public
     await db.commit()
-    return {"message": f"Embedding {embedding_id} публичность изменена на {is_public}"}
+    return {"message": "OK"}

@@ -13,7 +13,7 @@ from service.middlewares import (
 from service.monitoring.metrics import configure_metrics
 from service.monitoring.status import router as status_router
 from service.monitoring.tracing import setup_tracer
-from service.routes import chat_router, embeddings, health_router, metrics_router, rags
+from service.routes import assistants, chat_router, embeddings, health_router, metrics_router, rags
 from service.settings import get_settings
 
 
@@ -27,7 +27,7 @@ async def lifespan(app: FastAPI) -> None:
 
 
 def get_application() -> FastAPI:
-    application = FastAPI(title="AutoRAG Service", lifespan=lifespan)
+    application = FastAPI(title="AutoRAG Service", openapi_version="3.0.2", lifespan=lifespan)
 
     application.add_middleware(LoggingMiddleware)
     application.add_middleware(ErrorHandlerMiddleware)
@@ -43,6 +43,7 @@ def get_application() -> FastAPI:
     application.include_router(embeddings.router, prefix="/api/v1", tags=["Embeddings"])
     application.include_router(rags.router, prefix="/api/v1", tags=["RAG"])
     application.include_router(chat_router, prefix="/api/v1", tags=["Chat"])
+    application.include_router(assistants.router, prefix="/api/v1", tags=["Assistant"])
     application.include_router(status_router, prefix="/status", tags=["Status"])
 
     return application

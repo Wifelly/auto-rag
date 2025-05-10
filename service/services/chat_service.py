@@ -23,7 +23,9 @@ class ChatService:
         if embedding_ids:
             embeddings = await self.db.execute(
                 select(Embedding).where(
-                    Embedding.id.in_(embedding_ids), Embedding.user_id == user_id, Embedding.is_deleted == False
+                    Embedding.id.in_(embedding_ids),
+                    Embedding.user_id == user_id,
+                    Embedding.is_deleted.is_(False),
                 )
             )
             session.embeddings = embeddings.scalars().all()
@@ -42,9 +44,13 @@ class ChatService:
         source: str | None = None,
         source_files: list[str] | None = None,
     ) -> ChatMessage:
-        if source_files and isinstance(source_files[0], str):
-            logger.info(f"[CHAT] Обработано сообщение с именами файлов: {source_files}")
-            source_files = None
+        existing = await self.db.scalar(select(func.count(ChatMessage.id)).where(ChatMessage.chat_id == chat_id))
+
+        if role == ChatRole.USER and existing == 0:
+            session = await self.get_session(chat_id)
+            if session and not session.title:
+                trimmed = content.strip()
+                session.title = (trimmed[:100] + "…") if len(trimmed) > 100 else trimmed
 
         msg = ChatMessage(
             chat_id=chat_id,
@@ -54,30 +60,21 @@ class ChatService:
             source_files=source_files,
         )
         self.db.add(msg)
-
-        session = await self.get_session(chat_id)
-
-        if role == ChatRole.USER and not session.title:
-            existing_messages = await self.db.scalar(
-                select(func.count(ChatMessage.id)).where(ChatMessage.chat_id == chat_id)
-            )
-            if existing_messages == 0:
-                session.title = (content.strip()[:100] + "…") if len(content.strip()) > 100 else content.strip()
-
         await self.db.commit()
+        await self.db.refresh(msg)
 
         total = await self.db.scalar(select(func.count(ChatMessage.id)).where(ChatMessage.chat_id == chat_id))
         if total > MAX_MESSAGES_PER_CHAT:
-            num_to_delete = total - MAX_MESSAGES_PER_CHAT
+            to_delete = total - MAX_MESSAGES_PER_CHAT
             subq = (
                 select(ChatMessage.id)
                 .where(ChatMessage.chat_id == chat_id)
                 .order_by(ChatMessage.created_at.asc())
-                .limit(num_to_delete)
+                .limit(to_delete)
             )
             await self.db.execute(delete(ChatMessage).where(ChatMessage.id.in_(subq)))
             await self.db.commit()
-            logger.info(f"[CHAT] Удалено {num_to_delete} старых сообщений из чата {chat_id}")
+            logger.info(f"[CHAT] Удалено {to_delete} старых сообщений из чата {chat_id}")
 
         return msg
 
@@ -100,3 +97,9 @@ class ChatService:
 
     async def handle_uploaded_file(self, file, chunk_size: int = 500, chunk_overlap: int = 100):
         return await self.file_handler.handle_uploaded_file(file, chunk_size, chunk_overlap)
+
+    async def get_sessions_by_user(self, user_id: int) -> list[ChatSession]:
+        result = await self.db.execute(
+            select(ChatSession).where(ChatSession.user_id == user_id).order_by(ChatSession.created_at.desc())
+        )
+        return result.scalars().all()

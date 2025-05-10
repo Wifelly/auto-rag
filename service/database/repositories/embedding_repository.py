@@ -15,6 +15,7 @@ class EmbeddingRepository:
         files: list[str],
         status_id: int,
         vector_db_path: str = "",
+        index_uid: str = "",
     ) -> Embedding:
         embedding = Embedding(
             user_id=user_id,
@@ -22,6 +23,7 @@ class EmbeddingRepository:
             files=files,
             status_id=status_id,
             vector_db_path=vector_db_path,
+            index_uid=index_uid,
             is_deleted=False,
         )
         self.db.add(embedding)
@@ -69,7 +71,11 @@ class EmbeddingRepository:
         return None
 
     async def update_embedding_metadata(
-        self, embedding_id: int, files: list[str], vector_db_path: str, index_uid: str
+        self,
+        embedding_id: int,
+        files: list[str],
+        vector_db_path: str,
+        index_uid: str,
     ) -> Embedding | None:
         embedding = await self.get_embedding_by_id(embedding_id)
         if embedding:

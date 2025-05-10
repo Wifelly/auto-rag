@@ -1,57 +1,60 @@
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from service.monitoring.logger import logger
 from service.services.embedding_container import embedding_manager
 from service.services.embedding_service import EmbeddingService
 
 
 class ContextRetriever:
-    def __init__(self, rag_service, db_session):
-        self.rag_service = rag_service
-        self.db_session = db_session
+    def __init__(self, db: AsyncSession):
+        self.db = db
+        self.emb_svc = EmbeddingService(db)
 
-    async def retrieve(self, query: str, emb_id: int, top_k: int, min_score: float, use_web: bool):
-        embedding_docs = []
-        source_files = set()
-        parts = []
-        source_label = "llm"
-        top_score = 0.0
+    async def get_context(
+        self,
+        embedding_ids: list[int],
+        query: str,
+        top_k: int = 5,
+        min_score: float = 0.2,
+    ) -> tuple[str, list[str]]:
+        parts: list[str] = []
+        files: list[str] = []
 
-        if use_web and getattr(self.rag_service, "web_enabled", False):
-            web_context, web_sources = await self.rag_service._search_web(query)
-            if web_context:
-                parts.append(web_context)
-            if web_sources:
-                source_files.update(web_sources)
-            source_label = "web"
+        if not embedding_ids:
+            logger.warning("[ContextRetriever] embedding_ids пуст — нет контекста")
+            return "", []
 
-        else:
-            embedding_service = EmbeddingService(self.db_session)
-            embedding = await embedding_service.get_embedding_by_id(emb_id)
-            if embedding and embedding.vector_db_path:
-                embedding_docs = (
-                    embedding_manager.search(
-                        vector_db_path=embedding.vector_db_path,
-                        query=query,
-                        top_k=top_k,
-                        min_score=min_score,
-                    )
-                    or []
-                )
+        for emb_id in embedding_ids:
+            emb = await self.emb_svc.get_embedding_by_id(emb_id)
+            if not emb or not emb.vector_db_path:
+                logger.warning(f"[ContextRetriever] Embedding {emb_id} не найден или без пути")
+                continue
 
-                logger.info(
-                    f"[RAG] Найдено {len(embedding_docs)} документов из эмбеддинга {embedding.name or embedding.id}"
-                )
-                source_label = "rag"
+            try:
+                embedding_manager.load_embedding(emb.vector_db_path)
+            except Exception as e:
+                logger.error(f"[ContextRetriever] Не удалось загрузить индекс {emb_id}: {e}")
+                continue
 
-        if embedding_docs:
-            for idx, doc in enumerate(embedding_docs):
-                parts.append(doc["content"] if isinstance(doc, dict) else doc.page_content)
-                meta = doc.get("metadata", {}) if isinstance(doc, dict) else getattr(doc, "metadata", {})
-                source = meta.get("source_file") or meta.get("filename") or meta.get("path") or meta.get("source")
-                if source:
-                    source_files.add(source)
+            docs = embedding_manager.search(
+                emb.vector_db_path,
+                query=query,
+                top_k=top_k,
+                min_score=min_score,
+            )
+            logger.info(f"[ContextRetriever] По embedding {emb_id} найдено {len(docs)} фрагментов")
 
-            score = embedding_docs[0].get("score") if isinstance(embedding_docs[0], dict) else None
-            if isinstance(score, (int, float)):
-                top_score = round(score, 4)
+            for doc in docs:
+                meta = doc.get("metadata", {})
+                src = meta.get("source_file") or meta.get("filename") or "неизвестно"
+                text = doc.get("content", "").strip()
+                parts.append(f'Из файла "{src}":\n{text}')
+                files.append(src)
 
-        return "\n\n".join(parts), source_label, sorted(source_files), top_score
+        parts = parts[:top_k]
+        unique_files = []
+        for f in files:
+            if f not in unique_files:
+                unique_files.append(f)
+
+        return "\n\n".join(parts), unique_files

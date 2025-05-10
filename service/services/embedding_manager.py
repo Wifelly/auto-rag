@@ -3,90 +3,88 @@ from pathlib import Path
 
 from langchain_community.vectorstores import FAISS
 
+from service.config import Config
 from service.models.embedding.embedding import DEFAULT_MODEL_NAME, EmbeddingModel
 from service.monitoring.logger import logger
 
 
 class EmbeddingManager:
     def __init__(
-        self, base_dir: str = "saved_indexes", model_name: str = DEFAULT_MODEL_NAME, max_cache_size: int = 10
+        self,
+        base_dir: str = Config.INDEX_DIR,
+        model_name: str = DEFAULT_MODEL_NAME,
+        max_cache_size: int = 10,
     ) -> None:
         self.base_dir = Path(base_dir).resolve()
+        self.base_dir.mkdir(parents=True, exist_ok=True)
+
         self.model = EmbeddingModel(model_name=model_name)
         self.loaded_embeddings: OrderedDict[str, FAISS] = OrderedDict()
         self.max_cache_size = max_cache_size
 
-        if not self.base_dir.exists():
-            self.base_dir.mkdir(parents=True, exist_ok=True)
-            logger.info(f"Создана директория для индексов: {self.base_dir}")
+        logger.info(f"[EmbeddingManager] Using index directory: {self.base_dir}")
 
-    def load_embedding(self, vector_db_path: str) -> bool:
-        faiss_file = Path(vector_db_path + ".faiss")
-        pkl_file = Path(vector_db_path + ".pkl")
+    def load_embedding(self, identifier: str) -> bool:
+        uid = Path(identifier).name
+        faiss_file = self.base_dir / f"{uid}.faiss"
+        pkl_file = self.base_dir / f"{uid}.pkl"
 
-        index_uid = Path(vector_db_path).name
-
-        if index_uid in self.loaded_embeddings:
-            self.loaded_embeddings.move_to_end(index_uid)
+        if uid in self.loaded_embeddings:
+            self.loaded_embeddings.move_to_end(uid)
             return True
 
         if not faiss_file.exists() or not pkl_file.exists():
-            raise FileNotFoundError(f"[FAISS] Файлы не найдены по пути: {vector_db_path}")
+            raise FileNotFoundError(f"[FAISS] Files not found: {faiss_file}, {pkl_file}")
 
-        try:
-            db = FAISS.load_local(
-                str(Path(vector_db_path).parent),
-                self.model,
-                index_name=index_uid,
-                allow_dangerous_deserialization=True,
-            )
+        db = FAISS.load_local(
+            str(self.base_dir),
+            self.model,
+            index_name=uid,
+            allow_dangerous_deserialization=True,
+        )
+        if len(self.loaded_embeddings) >= self.max_cache_size:
+            self.loaded_embeddings.popitem(last=False)
+        self.loaded_embeddings[uid] = db
 
-            if len(self.loaded_embeddings) >= self.max_cache_size:
-                self.loaded_embeddings.popitem(last=False)
+        logger.info(f"[EmbeddingManager] Loaded index: {uid}")
+        return True
 
-            self.loaded_embeddings[index_uid] = db
-            logger.info(f"[FAISS] Загружен индекс {index_uid}")
-            logger.info(f"[DEBUG] Индекс {index_uid} загружен. Сейчас в памяти: {list(self.loaded_embeddings.keys())}")
+    def unload_embedding(self, identifier: str) -> bool:
+        uid = Path(identifier).name
+        removed = self.loaded_embeddings.pop(uid, None)
+        if removed:
+            logger.info(f"[EmbeddingManager] Unloaded index: {uid}")
             return True
-
-        except Exception as e:
-            logger.exception(f"[FAISS] Ошибка загрузки индекса {index_uid}: {e}")
-            raise RuntimeError(f"[FAISS] Ошибка загрузки: {e}")
-
-    def unload_embedding(self, vector_db_path: str) -> bool:
-        index_uid = Path(vector_db_path).name
-        return self.loaded_embeddings.pop(index_uid, None) is not None
+        return False
 
     def get_loaded_embeddings(self) -> list[str]:
         return list(self.loaded_embeddings.keys())
 
-    def search(self, vector_db_path: str, query: str, top_k: int = 5, min_score: float = 0.0) -> list[dict]:
-        index_uid = Path(vector_db_path).name
-
-        if index_uid not in self.loaded_embeddings:
-            logger.warning(f"[FAISS] Индекс {index_uid} не загружен в память.")
+    def search(
+        self,
+        identifier: str,
+        query: str,
+        top_k: int = 5,
+        min_score: float = 0.0,
+    ) -> list[dict]:
+        uid = Path(identifier).name
+        if uid not in self.loaded_embeddings:
+            logger.warning(f"[EmbeddingManager] Index {uid} is not loaded.")
             return []
 
         try:
-            results = self.loaded_embeddings[index_uid].similarity_search_with_score(query, k=top_k)
-            logger.info(f"[FAISS] Поиск в индексе {index_uid} по запросу '{query}', найдено: {len(results)}")
-
-            filtered = [
-                {
-                    "content": doc.page_content,
-                    "score": float(score),
-                    "metadata": doc.metadata,
-                }
-                for doc, score in results
-                if score >= min_score
-            ]
-
-            logger.info(f"[FAISS] После фильтрации по min_score={min_score}: {len(filtered)} результатов")
-            return filtered
-
+            hits = self.loaded_embeddings[uid].similarity_search_with_score(query, k=top_k)
         except Exception as e:
-            logger.exception(f"[FAISS] Ошибка при поиске в индексе {index_uid}: {e}")
+            logger.exception(f"[EmbeddingManager] Search error in {uid}: {e}")
             return []
+
+        results = [
+            {"content": doc.page_content, "score": float(score), "metadata": doc.metadata}
+            for doc, score in hits
+            if score >= min_score
+        ]
+        logger.info(f"[EmbeddingManager] Search in {uid}: found {len(results)} results")
+        return results
 
 
 embedding_manager = EmbeddingManager()

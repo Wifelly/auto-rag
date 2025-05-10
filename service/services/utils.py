@@ -19,10 +19,13 @@ class Utils:
 
     @staticmethod
     def clean_text(text: str) -> str:
+        text = re.sub(r"[–—−]", "-", text)
+        text = text.replace("", "- ").replace("•", "- ").replace("·", "- ")
+        text = text.replace("\u00a0", " ")
         text = text.replace("\x00", "")
-        lines = text.splitlines()
-        cleaned = [re.sub(r"[ \t]+", " ", line).strip() for line in lines]
-        return "\n".join(cleaned).strip()
+        text = re.sub(r"[ \t]+", " ", text)
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        return "\n".join(lines)
 
     @staticmethod
     async def extract_text(file_path: Path) -> str:

@@ -1,40 +1,22 @@
-# --- prompt_builder.py ---
+from service.config import Config
 
 
 class PromptBuilder:
-    SYSTEM_PROMPT = "Ты — медицинский помощник."
+    SYSTEM_PROMPT = Config.SYSTEM_PROMPT
 
     @staticmethod
     def build_initial_prompt(query: str) -> list[dict]:
         return [
             {"role": "system", "content": PromptBuilder.SYSTEM_PROMPT},
-            {"role": "user", "content": f"Ответь на вопрос пользователя: {query}"},
+            {"role": "user", "content": query},
         ]
 
     @staticmethod
     def build_with_context(initial: str, query: str, context: str) -> list[dict]:
+        system_content = PromptBuilder.SYSTEM_PROMPT
+        if context:
+            system_content += f"\n\nИспользуй следующие фрагменты:\n{context}"
         return [
-            {"role": "system", "content": PromptBuilder.SYSTEM_PROMPT},
-            {"role": "user", "content": f"Ответь на вопрос пользователя: {query}"},
-            {"role": "assistant", "content": initial},
-            {
-                "role": "user",
-                "content": (
-                    f"Дополнительно используй эти документы:\n<context>{context}</context>\n"
-                    f"Повтори или уточни ответ на вопрос: {query}"
-                ),
-            },
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": f"{query}\n\n- сформируй ответ в виде **нумерованного списка.**"},
         ]
-
-    @staticmethod
-    def format_prompt(messages: list[dict]) -> str:
-        parts = []
-        for msg in messages:
-            role, content = msg["role"], msg["content"]
-            if role == "system":
-                parts.append(f"[SYSTEM]\n{content}")
-            elif role == "user":
-                parts.append(f"[USER]\n{content}")
-            elif role == "assistant":
-                parts.append(f"[ASSISTANT]\n{content}")
-        return "\n\n".join(parts)
