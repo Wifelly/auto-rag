@@ -37,6 +37,21 @@ services:
         delay: 10s
         max_attempts: 3
         window: 30s
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    volumes:
+      - ../frontend:/app
+      - /app/node_modules
+    environment:
+      - VITE_API_URL=http://auto-rag:8080
+    tty: true
+    restart: always
+    depends_on:
+      - auto-rag
 
   otel-collector:
     image: otel/opentelemetry-collector:latest
@@ -60,6 +75,24 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: always
+
+  #vllm:
+  #  image: vllm/vllm-openai:latest
+  #  runtime: nvidia
+  #  environment:
+  #    - HUGGING_FACE_HUB_TOKEN=<secret>
+  #  volumes:
+  #    - ~/.cache/huggingface:/root/.cache/huggingface
+  #  ports:
+  #    - "8000:8000"
+  #  ipc: host
+  # command: --model mistralai/Mistral-7B-v0.1
+  #  deploy:
+  #    resources:
+  #      reservations:
+  #        devices:
+  #          - driver: nvidia
+  #           count: all
 
 volumes:
   postgres_data:
