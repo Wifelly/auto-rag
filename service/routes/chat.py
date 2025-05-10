@@ -10,7 +10,7 @@ from service.database.models import ChatRole
 from service.services.chat_file_pipeline import ChatFileHandler
 from service.services.chat_service import ChatService
 
-router = APIRouter(tags=["Chat"])
+router = APIRouter(prefix="/chat", tags=["Chat"])
 
 
 class CreateChatRequest(BaseModel):
