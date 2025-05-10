@@ -27,6 +27,7 @@ class RagService:
         if not api_key:
             logger.warning("[WebSearch] Tavily API ключ не настроен")
             return "", []
+
         url = "https://api.tavily.com/search"
         payload = {
             "api_key": api_key,
@@ -35,16 +36,37 @@ class RagService:
             "include_answer": True,
             "include_raw_content": False,
         }
+
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                    data = await resp.json()
+            async with (
+                aiohttp.ClientSession() as session,
+                session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp,
+            ):
+                data = await resp.json()
         except Exception as e:
             logger.error(f"[WebSearch] Ошибка при запросе: {e}")
             return "", []
 
-        answer = data.get("answer", {}).get("text", "").strip()
-        sources = data.get("answer", {}).get("sources", [])
+        if not isinstance(data, dict):
+            logger.error(f"[WebSearch] Ответ не является словарём: {data}")
+            return "", []
+
+        answer = ""
+        sources = []
+
+        raw_answer = data.get("answer")
+        if isinstance(raw_answer, str):
+            answer = raw_answer.strip()
+        elif isinstance(raw_answer, dict):
+            answer = raw_answer.get("text", "").strip()
+            sources = raw_answer.get("sources", [])
+        else:
+            logger.error(f"[WebSearch] Некорректный формат поля 'answer': {raw_answer}")
+            return "", []
+
+        if not sources and isinstance(data.get("results"), list):
+            sources = [r.get("url") for r in data["results"] if isinstance(r, dict) and "url" in r]
+
         return answer, sources
 
     async def answer_query(
