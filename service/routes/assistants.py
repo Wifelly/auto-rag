@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,8 +30,8 @@ async def summarize(req: SummarizeRequest):
 
 class QuizRequest(BaseModel):
     text: str
-    num_questions: int = 5
-    difficulty: str = "medium"
+    num_questions: int = Field(5, ge=1)
+    difficulty: str = Field("medium")
 
 
 class QuizQuestion(BaseModel):
@@ -60,6 +60,45 @@ async def generate_quiz(req: QuizRequest):
     return QuizResponse.parse_raw(result["response"])
 
 
+class QuizFromDocRequest(BaseModel):
+    embedding_ids: list[int] = Field(..., description="ID векторных индексов")
+    num_questions: int = Field(5, ge=1)
+    difficulty: str = Field("medium")
+
+
+class QuizFromDocResponse(BaseModel):
+    questions: list[QuizQuestion]
+
+
+@router.post("/quiz-from-doc", response_model=QuizFromDocResponse)
+async def quiz_from_doc(
+    req: QuizFromDocRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    retriever = ContextRetriever(db)
+    context_text, _ = await retriever.get_context(
+        embedding_ids=req.embedding_ids,
+        query="",
+        top_k=10,
+        min_score=0.0,
+    )
+    if not context_text:
+        raise HTTPException(status_code=404, detail="Контекст не найден")
+
+    user_content = (
+        f"У тебя есть следующие выдержки из документа:\n\n{context_text}\n\n"
+        f"Сгенерируй {req.num_questions} контрольных вопросов (сложность: {req.difficulty}). "
+        "Верни ответ в формате JSON:"
+        '{"questions":[{"question":...,"options":[...],"answer":...},...] }'
+    )
+    messages = [
+        {"role": "system", "content": PromptBuilder.SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+    result = await llm_service.call(messages=messages)
+    return QuizFromDocResponse.parse_raw(result["response"])
+
+
 class EvaluateRequest(BaseModel):
     question: str
     student_answer: str
@@ -77,8 +116,9 @@ async def evaluate(req: EvaluateRequest):
     user_msg = (
         f"Оцени ответ ученика на вопрос:\n{req.question}\n\n"
         f"Ответ ученика:\n{req.student_answer}\n\n"
-        f"Критерии оценки:\n- " + "\n- ".join(req.rubric) + "\n\nВерни JSON вида "
-        '{"score": <число>, "max_score": <число>, "feedback": "..."}'
+        f"Критерии оценки:\n- "
+        + "\n- ".join(req.rubric)
+        + '\n\nВерни JSON вида {"score": <число>, "max_score": <число>, "feedback": "..."}'
     )
     messages = [{"role": "system", "content": PromptBuilder.SYSTEM_PROMPT}, {"role": "user", "content": user_msg}]
     result = await llm_service.call(messages=messages)
@@ -101,7 +141,7 @@ async def context_preview(
     req: ContextPreviewRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    text, _files = await ContextRetriever(db).get_context(
+    text, files = await ContextRetriever(db).get_context(
         embedding_ids=req.embedding_ids,
         query=req.query,
         top_k=req.top_k,

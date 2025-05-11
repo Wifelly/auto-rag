@@ -156,5 +156,82 @@ class RagService:
         meta["files"] = source_files
         return {"response": final, "meta": meta}
 
+    async def stream_answer_query(
+        self,
+        query: str,
+        embedding_ids: list[int],
+        db_session: AsyncSession,
+        mode: Mode = Mode.RAG,
+        top_k: int = 5,
+        min_score: float = 0.0,
+        use_web: bool = False,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        max_tokens: int | None = None,
+        stop: list[str] | None = None,
+    ):
+        user_stop = stop or Config.DEFAULT_STOP
+        stop_tokens = [] if mode == Mode.WEB else user_stop
+
+        initial_res = await llm_service.call(
+            messages=PromptBuilder.build_initial_prompt(query),
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
+            stop=stop_tokens,
+        )
+        initial = initial_res.get("response", "[Ошибка генерации]")
+
+        yield f"data: {initial}\n\n"
+
+        if mode == Mode.CHAT:
+            return
+
+        full_ctx = ""
+        source_files = []
+
+        if mode == Mode.WEB and use_web and self.web_enabled:
+            web_ctx, urls = await self._search_web(query)
+            if web_ctx:
+                full_ctx = web_ctx
+                source_files = urls
+            else:
+                return
+
+        if mode == Mode.RAG or (mode == Mode.WEB and not full_ctx):
+            for emb_id in embedding_ids:
+                emb = await ContextRetriever(db_session).emb_svc.get_embedding_by_id(emb_id)
+                if emb and emb.index_uid:
+                    try:
+                        embedding_manager.load_embedding(emb.index_uid)
+                    except Exception as e:
+                        logger.error(f"[RagService] Не удалось загрузить {emb.index_uid}: {e}")
+
+            ctx_text, ctx_files = await ContextRetriever(db_session).get_context(
+                embedding_ids=embedding_ids,
+                query=query,
+                top_k=top_k,
+                min_score=min_score,
+            )
+            if ctx_text:
+                full_ctx = ctx_text
+                source_files = ctx_files
+            else:
+                return
+
+        prompt = PromptBuilder.build_with_context(initial, query, full_ctx)
+
+        async for token in llm_service.stream(
+            messages=prompt,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
+            stop=stop_tokens,
+        ):
+            yield f"data: {token}\n\n"
+
+        if source_files:
+            yield f"data: [FILES] {' | '.join(source_files)}\n\n"
+
 
 rag_service = RagService()

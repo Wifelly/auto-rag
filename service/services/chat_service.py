@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -103,3 +103,15 @@ class ChatService:
             select(ChatSession).where(ChatSession.user_id == user_id).order_by(ChatSession.created_at.desc())
         )
         return result.scalars().all()
+
+    async def update_title(self, chat_id: UUID, new_title: str) -> ChatSession:
+        stmt = (
+            update(ChatSession)
+            .where(ChatSession.id == chat_id)
+            .values(title=new_title)
+            .execution_options(synchronize_session="fetch")
+        ).returning(ChatSession)
+        result = await self.db.execute(stmt)
+        updated = result.scalar_one()
+        await self.db.commit()
+        return updated

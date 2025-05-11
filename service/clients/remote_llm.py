@@ -1,3 +1,5 @@
+import json
+
 import aiohttp
 
 from service.clients.base_llm import BaseLLM
@@ -69,7 +71,20 @@ class RemoteLLM(BaseLLM):
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
+
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
             async with session.post(self.url, json=payload, headers=headers) as resp:
-                async for chunk in resp.content:
-                    yield chunk
+                async for line in resp.content:
+                    line = line.decode("utf-8").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    if line == "data: [DONE]":
+                        break
+                    try:
+                        payload = json.loads(line.removeprefix("data:").strip())
+                        delta = payload["choices"][0]["delta"]
+                        content = delta.get("content")
+                        if content:
+                            yield content
+                    except Exception as e:
+                        logger.warning(f"[RemoteLLM] Ошибка парсинга стрима: {e}")

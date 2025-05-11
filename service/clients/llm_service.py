@@ -49,13 +49,14 @@ class LLMService:
         if stop is None:
             stop = Config.DEFAULT_STOP
 
-        return llm.generate_stream(
+        async for token in llm.generate_stream(
             messages=messages,
             temperature=temperature,
             top_p=top_p,
             max_tokens=max_tokens,
             stop=stop,
-        )
+        ):
+            yield token
 
 
 llm_service = LLMService()

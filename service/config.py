@@ -19,7 +19,8 @@ class Config:
     DEFAULT_TEMPERATURE: float = float(os.getenv("DEFAULT_TEMPERATURE", 0.2))
     DEFAULT_TOP_P: float = float(os.getenv("DEFAULT_TOP_P", 0.9))
     DEFAULT_MAX_TOKENS: int = int(os.getenv("DEFAULT_MAX_TOKENS", 1024))
-    DEFAULT_STOP: list[str] = []
+    _stop_env = os.getenv("DEFAULT_STOP", "")
+    DEFAULT_STOP: list[str] = [tok for tok in _stop_env.split(",") if tok]
 
     SYSTEM_PROMPT: str = "Ты — медицинский ассистент. Отвечай чётко, структурировано и обоснованно."
 
