@@ -39,7 +39,7 @@ class ContextRetriever:
                 logger.error(f"[ContextRetriever] Не удалось загрузить индекс {emb_id}: {e}")
                 continue
 
-            docs = embedding_manager.search(
+            docs = embedding_manager.search_with_meta(
                 emb.vector_db_path,
                 query=query,
                 top_k=top_k,
@@ -48,9 +48,8 @@ class ContextRetriever:
             logger.info(f"[ContextRetriever] По embedding {emb_id} найдено {len(docs)} фрагментов")
 
             for doc in docs:
-                meta = doc.get("metadata", {})
-                src = meta.get("source_file") or meta.get("filename") or "неизвестно"
-                text = doc.get("content", "").strip()
+                src = doc["source_file"]
+                text = doc["content"].strip()
                 parts.append(f'Из файла "{src}":\n{text}')
                 files.append(src)
 

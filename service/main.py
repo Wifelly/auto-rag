@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 from opentelemetry.instrumentation.asgi import OpenTelemetryMiddleware
 
@@ -18,12 +19,20 @@ from service.settings import get_settings
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> None:
+async def lifespan(app: FastAPI):
     settings = get_settings()
+
     configure_metrics(settings)
     await init_database()
 
+    scheduler = AsyncIOScheduler()
+    scheduler.start()
+
+    app.state.scheduler = scheduler
+
     yield
+
+    scheduler.shutdown()
 
 
 def get_application() -> FastAPI:

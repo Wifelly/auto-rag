@@ -1,6 +1,7 @@
 import uuid
 from pathlib import Path
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from service.config import Config
@@ -72,3 +73,8 @@ class EmbeddingService:
 
     async def restore_embedding(self, embedding_id: int) -> bool:
         return await self.repository.restore_embedding(embedding_id)
+
+    async def get_embedding_by_name(self, name: str) -> Embedding | None:
+        stmt = select(Embedding).where(Embedding.name == name)
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()

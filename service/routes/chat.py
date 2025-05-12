@@ -287,10 +287,15 @@ async def upload_files(
         status_id=1,
     )
 
-    pipeline = DocumentPipeline()
+    # Читаем файлы в память
+    files_data: list[tuple[str, bytes]] = []
+    for upload in files:
+        content = await upload.read()
+        files_data.append((upload.filename, content))
 
-    chunks = await pipeline.train_from_uploaded_files(
-        files=files,
+    pipeline = DocumentPipeline()
+    chunks = await pipeline.train_from_bytes(
+        files_data=files_data,
         db=db,
         embedding_id=emb.id,
         chunk_size=500,
@@ -302,15 +307,15 @@ async def upload_files(
         raise HTTPException(status_code=500, detail="Failed to index upload files")
 
     embedding_ids = [emb.id]
-
     created_msgs: list[ChatMessageResponse] = []
+
     for doc in chunks:
         msg = await svc_chat.add_message(
             chat_id,
             ChatRole.SYSTEM,
             doc.page_content,
             source="file_chunk",
-            source_files=[doc.metadata.get("file_name")],
+            source_files=[doc.metadata.get("source_file")],
         )
         created_msgs.append(
             ChatMessageResponse(

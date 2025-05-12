@@ -60,7 +60,7 @@ class EmbeddingManager:
     def get_loaded_embeddings(self) -> list[str]:
         return list(self.loaded_embeddings.keys())
 
-    def search(
+    def search_with_meta(
         self,
         identifier: str,
         query: str,
@@ -72,18 +72,20 @@ class EmbeddingManager:
             logger.warning(f"[EmbeddingManager] Index {uid} is not loaded.")
             return []
 
-        try:
-            hits = self.loaded_embeddings[uid].similarity_search_with_score(query, k=top_k)
-        except Exception as e:
-            logger.exception(f"[EmbeddingManager] Search error in {uid}: {e}")
-            return []
-
-        results = [
-            {"content": doc.page_content, "score": float(score), "metadata": doc.metadata}
-            for doc, score in hits
-            if score >= min_score
-        ]
-        logger.info(f"[EmbeddingManager] Search in {uid}: found {len(results)} results")
+        hits = self.loaded_embeddings[uid].similarity_search_with_score(query, k=top_k)
+        results = []
+        for doc, score in hits:
+            if score < min_score:
+                continue
+            md = doc.metadata or {}
+            results.append(
+                {
+                    "content": doc.page_content,
+                    "score": float(score),
+                    "source_file": md.get("source_file") or md.get("filename") or "неизвестно",
+                }
+            )
+        logger.info(f"[EmbeddingManager] search_with_meta in {uid}: {len(results)} hits")
         return results
 
 

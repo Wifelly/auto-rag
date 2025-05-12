@@ -1,7 +1,6 @@
 import re
 from pathlib import Path
 
-from fastapi import UploadFile
 from langchain.docstore.document import Document
 from langchain_community.vectorstores import FAISS
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,97 +50,100 @@ class DocumentPipeline:
             logger.info(f"[DocumentPipeline] Loading embedding model: {self.model_name}")
             self._embedder = EmbeddingModel(model_name=self.model_name)
 
-    async def train_from_uploaded_files(
-        self,
-        files: list[UploadFile],
-        db: AsyncSession,
-        embedding_id: int,
-        chunk_size: int = 500,
-        chunk_overlap: int = 100,
-        append: bool = False,
-    ) -> bool:
-        await self._load_embeddings()
-        svc = EmbeddingService(db)
 
-        emb = await svc.get_embedding_by_id(embedding_id)
-        if not emb or not emb.index_uid:
-            logger.error(f"[DocumentPipeline] Embedding {embedding_id} not found or missing UID")
-            return False
+async def train_from_bytes(
+    self,
+    files_data: list[tuple[str, bytes]],
+    db: AsyncSession,
+    embedding_id: int,
+    chunk_size: int = 500,
+    chunk_overlap: int = 100,
+    append: bool = False,
+    return_documents: bool = False,
+) -> bool | list[Document]:
+    await self._load_embeddings()
+    svc = EmbeddingService(db)
 
-        uid = emb.index_uid
-        faiss_path = Path(Config.INDEX_DIR) / f"{uid}.faiss"
-        pkl_path = Path(Config.INDEX_DIR) / f"{uid}.pkl"
+    emb = await svc.get_embedding_by_id(embedding_id)
+    if not emb or not emb.index_uid:
+        logger.error(f"[DocumentPipeline] Embedding {embedding_id} not found or missing UID")
+        return [] if return_documents else False
 
-        # Mark as "processing"
-        await svc.update_embedding_status(embedding_id, status_id=2)
+    uid = emb.index_uid
+    faiss_path = Path(Config.INDEX_DIR) / f"{uid}.faiss"
+    pkl_path = Path(Config.INDEX_DIR) / f"{uid}.pkl"
 
-        documents: list[Document] = []
-        filenames: list[str] = []
-        total_size = 0
-        splitter = HybridTextSplitter(max_chunk_chars=chunk_size, overlap_chars=chunk_overlap)
+    await svc.update_embedding_status(embedding_id, status_id=2)
 
-        for file in files:
-            try:
-                raw = await file.read()
-                text = await self.utils.extract_text_from_bytes(file.filename, raw)
-                text = self.utils.clean_text(text)
-                if not text:
-                    continue
+    documents: list[Document] = []
+    filenames: list[str] = []
+    total_size = 0
+    splitter = HybridTextSplitter(max_chunk_chars=chunk_size, overlap_chars=chunk_overlap)
 
-                total_size += len(text.encode("utf-8"))
-                if total_size > MAX_TEXT_SIZE:
-                    logger.warning(f"[DocumentPipeline] Total text size exceeded {MAX_TEXT_SIZE} bytes")
-                    await svc.update_embedding_status(embedding_id, status_id=4)
-                    return False
-
-                filenames.append(file.filename)
-                chunks = splitter.split(text)
-                if len(chunks) > MAX_ALLOWED_CHUNKS:
-                    logger.warning(f"[DocumentPipeline] {file.filename} produced {len(chunks)} chunks; skipping")
-                    continue
-
-                for idx, chunk in enumerate(chunks):
-                    documents.append(
-                        Document(
-                            page_content=chunk,
-                            metadata={"source_file": file.filename, "chunk_id": idx},
-                        )
-                    )
-            except Exception as e:
-                logger.error(f"[DocumentPipeline] Ошибка обработки {file.filename}: {e}")
-
-        if not documents:
-            await svc.update_embedding_status(embedding_id, status_id=4)
-            return False
-
+    for filename, raw in files_data:
         try:
-            if append and faiss_path.exists() and pkl_path.exists():
-                index = FAISS.load_local(
-                    Config.INDEX_DIR,
-                    self._embedder,
-                    index_name=uid,
-                    allow_dangerous_deserialization=True,
+            text = await Utils().extract_text_from_bytes(filename, raw)
+            text = Utils().clean_text(text)
+            if not text:
+                continue
+
+            total_size += len(text.encode("utf-8"))
+            if total_size > MAX_TEXT_SIZE:
+                logger.warning(f"[DocumentPipeline] Total text size exceeded {MAX_TEXT_SIZE} bytes")
+                await svc.update_embedding_status(embedding_id, status_id=4)
+                return [] if return_documents else False
+
+            filenames.append(filename)
+            chunks = splitter.split(text)
+            if len(chunks) > MAX_ALLOWED_CHUNKS:
+                logger.warning(f"[DocumentPipeline] {filename} produced {len(chunks)} chunks; skipping")
+                continue
+
+            for idx, chunk in enumerate(chunks):
+                documents.append(
+                    Document(
+                        page_content=chunk,
+                        metadata={"source_file": filename, "chunk_id": idx},
+                    )
                 )
-                index.add_documents(documents)
-                index.save_local(Config.INDEX_DIR, index_name=uid)
-            else:
-                index = FAISS.from_documents(documents, self._embedder)
-                index.save_local(Config.INDEX_DIR, index_name=uid)
-
-            combined_files = list(set((emb.files or []) + filenames))
-            base_index_path = Path(Config.INDEX_DIR) / uid
-
-            await svc.update_embedding_metadata(
-                embedding_id=embedding_id,
-                files=combined_files,
-                vector_db_path=str(base_index_path),
-                index_uid=uid,
-            )
-            await svc.update_embedding_status(embedding_id, status_id=3)
-            logger.info(f"[DocumentPipeline] Индекс сохранен: {faiss_path}")
-            return True
-
         except Exception as e:
-            logger.exception(f"[DocumentPipeline] Ошибка создания индекса: {e}")
-            await svc.update_embedding_status(embedding_id, status_id=4)
-            return False
+            logger.error(f"[DocumentPipeline] Ошибка обработки {filename}: {e}")
+
+    if not documents:
+        await svc.update_embedding_status(embedding_id, status_id=4)
+        return [] if return_documents else False
+
+    try:
+        if append and faiss_path.exists() and pkl_path.exists():
+            index = FAISS.load_local(
+                Config.INDEX_DIR,
+                self._embedder,
+                index_name=uid,
+                allow_dangerous_deserialization=True,
+            )
+            index.add_documents(documents)
+            index.save_local(Config.INDEX_DIR, index_name=uid)
+        else:
+            index = FAISS.from_documents(documents, self._embedder)
+            index.save_local(Config.INDEX_DIR, index_name=uid)
+
+        combined = list(set((emb.files or []) + filenames))
+        base_path = Path(Config.INDEX_DIR) / uid
+
+        await svc.update_embedding_metadata(
+            embedding_id=embedding_id,
+            files=combined,
+            vector_db_path=str(base_path),
+            index_uid=uid,
+        )
+        await svc.update_embedding_status(embedding_id, status_id=3)
+        logger.info(f"[DocumentPipeline] Индекс сохранен: {faiss_path}")
+
+        if return_documents:
+            return documents
+        return True
+
+    except Exception as e:
+        logger.exception(f"[DocumentPipeline] Ошибка создания индекса: {e}")
+        await svc.update_embedding_status(embedding_id, status_id=4)
+        return [] if return_documents else False

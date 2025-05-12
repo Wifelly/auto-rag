@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ARRAY, Boolean, Column, Enum as PgEnum, ForeignKey, String, Table
+from sqlalchemy import ARRAY, Boolean, Column, Enum as PgEnum, ForeignKey, Index, String, Table
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -27,7 +27,7 @@ class EmbeddingStatus(Base):
 
 class Embedding(Base):
     __tablename__ = "embeddings"
-
+    __table_args__ = (Index("ix_embeddings_name", "name"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(nullable=False)
     user_id: Mapped[int] = mapped_column(nullable=False)
@@ -37,6 +37,7 @@ class Embedding(Base):
     index_uid: Mapped[str | None] = mapped_column(nullable=True)
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
     is_public: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_loader: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(onupdate=func.now())
 
