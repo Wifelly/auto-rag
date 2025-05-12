@@ -19,6 +19,9 @@ class ContextRetriever:
     ) -> tuple[str, list[str]]:
         parts: list[str] = []
         files: list[str] = []
+        if not query:
+            texts = [await self._load_by_id(doc_id) for doc_id in embedding_ids]
+            return "\n\n".join(texts), []
 
         if not embedding_ids:
             logger.warning("[ContextRetriever] embedding_ids пуст — нет контекста")

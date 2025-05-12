@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -57,11 +59,12 @@ async def generate_quiz(req: QuizRequest):
         },
     ]
     result = await llm_service.call(messages=messages)
-    return QuizResponse.parse_raw(result["response"])
+    return QuizResponse.model_validate_json(result["response"])
 
 
 class QuizFromDocRequest(BaseModel):
     embedding_ids: list[int] = Field(..., description="ID векторных индексов")
+    query: str | None = Field(None, description="Текстовый запрос (можно не указывать)")
     num_questions: int = Field(5, ge=1)
     difficulty: str = Field("medium")
 
@@ -70,16 +73,15 @@ class QuizFromDocResponse(BaseModel):
     questions: list[QuizQuestion]
 
 
-@router.post("/quiz-from-doc", response_model=QuizFromDocResponse)
+@router.post("/quiz-from-doc", response_model=QuizResponse)
 async def quiz_from_doc(
     req: QuizFromDocRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    retriever = ContextRetriever(db)
-    context_text, _ = await retriever.get_context(
+    context_text, _ = await ContextRetriever(db).get_context(
         embedding_ids=req.embedding_ids,
-        query="",
-        top_k=10,
+        query=req.query or "",
+        top_k=req.num_questions * 2,
         min_score=0.0,
     )
     if not context_text:
@@ -87,16 +89,18 @@ async def quiz_from_doc(
 
     user_content = (
         f"У тебя есть следующие выдержки из документа:\n\n{context_text}\n\n"
-        f"Сгенерируй {req.num_questions} контрольных вопросов (сложность: {req.difficulty}). "
+        f"Сгенерируй {req.num_questions} контрольных вопросов "
+        f"(сложность: {req.difficulty}). "
         "Верни ответ в формате JSON:"
-        '{"questions":[{"question":...,"options":[...],"answer":...},...] }'
+        '{"questions":[{"question":...,"options":[...],"answer":...},...]}'
     )
     messages = [
         {"role": "system", "content": PromptBuilder.SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
     ]
     result = await llm_service.call(messages=messages)
-    return QuizFromDocResponse.parse_raw(result["response"])
+    parsed = json.loads(result["response"])
+    return QuizResponse.model_validate(parsed)
 
 
 class EvaluateRequest(BaseModel):

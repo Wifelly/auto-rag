@@ -203,22 +203,34 @@ async def respond_stream(
     chat_id: UUID,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    query: str = Query(...),
-    embedding_ids: list[int] = Query(default_factory=list),
-    top_k: int = 5,
-    min_score: float = 0.0,
-    use_rag: bool = True,
-    use_web: bool = False,
-    temperature: float | None = None,
-    top_p: float | None = None,
-    max_tokens: int | None = None,
-    stop: list[str] = Query(default_factory=list),
+    query: str = Query(..., description="Текст запроса"),
+    embedding_ids: list[int] = Query(
+        default=[],
+        description="Список ID эмбеддингов, разделённых запятыми",
+    ),
+    top_k: int = Query(5, ge=1),
+    min_score: float = Query(0.0, ge=0.0, le=1.0),
+    use_rag: bool = Query(True),
+    use_web: bool = Query(False),
+    temperature: float | None = Query(None, ge=0.0, le=2.0),
+    top_p: float | None = Query(None, ge=0.0, le=1.0),
+    max_tokens: int | None = Query(None, ge=1),
+    stop: list[str] = Query(
+        default=[],
+        description="Список токенов для остановки генерации",
+    ),
 ):
     svc = ChatService(db)
     if not await svc.get_session(chat_id):
         raise HTTPException(status_code=404, detail="Chat not found")
 
-    mode = Mode.WEB if use_web else Mode.RAG if use_rag else Mode.CHAT
+    if use_web:
+        mode = Mode.WEB
+    elif use_rag:
+        mode = Mode.RAG
+    else:
+        mode = Mode.CHAT
+
     buffer: list[str] = []
 
     async def event_generator():
@@ -245,11 +257,14 @@ async def respond_stream(
             chat_id,
             ChatRole.ASSISTANT,
             full_response,
-            None,  # source
-            None,  # source_files
+            source=None,
+            source_files=None,
         )
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+    )
 
 
 @router.post("/{chat_id}/upload-file", response_model=list[ChatMessageResponse])
