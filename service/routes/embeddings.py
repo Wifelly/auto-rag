@@ -68,7 +68,6 @@ async def create_embedding(
     chunk_overlap: int = Form(200),
     db: AsyncSession = Depends(get_db),
 ):
-    # Считываем файлы в память
     files_data: list[tuple[str, bytes]] = []
     for upload in files:
         content = await upload.read()
