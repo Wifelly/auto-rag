@@ -1,6 +1,5 @@
 from fastapi import (
     APIRouter,
-    BackgroundTasks,
     Depends,
     File,
     Form,
@@ -16,9 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from service.database.config import get_db
 from service.database.models import Embedding
 from service.monitoring.logger import logger
-from service.services.document_pipeline import DocumentPipeline
 from service.services.embedding_container import embedding_manager
 from service.services.embedding_service import EmbeddingService
+from service.services.tasks import schedule_train_in_subprocess
 
 router = APIRouter(prefix="/embeddings", tags=["Embeddings"])
 
@@ -41,58 +40,41 @@ class SearchResponse(BaseModel):
     results: list[dict]
 
 
-async def _train_embedding_from_bytes(
-    files_data: list[tuple[str, bytes]],
-    db: AsyncSession,
-    embedding_id: int,
-    chunk_size: int,
-    chunk_overlap: int,
-    append: bool,
-):
-    try:
-        pipeline = DocumentPipeline()
-        ok = await pipeline.train_from_bytes(files_data, db, embedding_id, chunk_size, chunk_overlap, append=append)
-        if not ok:
-            logger.error(f"[BACKGROUND TRAIN] Эмбеддинг {embedding_id} не обучен (append={append})")
-    except Exception as e:
-        logger.exception(f"[BACKGROUND TRAIN] Ошибка фонового обучения эмбеддинга {embedding_id}: {e}")
-
-
 @router.post("/", response_model=EmbeddingResponse)
 async def create_embedding(
-    background_tasks: BackgroundTasks,
     user_id: int = Form(...),
     name: str = Form(...),
     files: list[UploadFile] = File(...),
-    chunk_size: int = Form(1024),
+    chunk_size: int = Form(500),
     chunk_overlap: int = Form(200),
     db: AsyncSession = Depends(get_db),
 ):
+    # Собираем файлы
     files_data: list[tuple[str, bytes]] = []
     for upload in files:
         content = await upload.read()
         files_data.append((upload.filename, content))
 
+    # Создаём запись в БД
     svc = EmbeddingService(db)
     try:
         emb = await svc.create_embedding(
-            user_id,
-            name,
-            [fn for fn, _ in files_data],
+            user_id=user_id,
+            name=name,
+            files=[fn for fn, _ in files_data],
             status_id=1,
         )
     except Exception as e:
         logger.exception(f"[CREATE EMBEDDING] {e}")
         raise HTTPException(500, f"Ошибка создания записи: {e}") from e
 
-    background_tasks.add_task(
-        _train_embedding_from_bytes,
-        files_data,
-        db,
-        emb.id,
-        chunk_size,
-        chunk_overlap,
-        False,
+    # Запускаем обучение в отдельном процессе (не передаём db или background_tasks)
+    schedule_train_in_subprocess(
+        files_data,  # 1. list[tuple[str, bytes]]
+        emb.id,  # 2. embedding_id
+        chunk_size,  # 3. chunk_size
+        chunk_overlap,  # 4. chunk_overlap
+        False,  # 5. append flag
     )
 
     return emb
@@ -100,38 +82,36 @@ async def create_embedding(
 
 @router.post("/{embedding_id}/append", response_model=EmbeddingResponse)
 async def append_to_embedding(
-    background_tasks: BackgroundTasks,
     embedding_id: int,
     user_id: int = Form(...),
     files: list[UploadFile] = File(...),
-    chunk_size: int = Form(1024),
+    chunk_size: int = Form(500),
     chunk_overlap: int = Form(200),
     db: AsyncSession = Depends(get_db),
 ):
+    # Проверяем права
     svc = EmbeddingService(db)
     emb = await svc.get_embedding_by_id(embedding_id)
     if not emb or emb.user_id != user_id:
         raise HTTPException(404, "Embedding не найден или доступ запрещён")
     if emb.status_id != 3:
         raise HTTPException(400, "Индекс ещё не готов")
-
     if not embedding_manager.base_dir.joinpath(f"{emb.index_uid}.faiss").exists():
         raise HTTPException(404, "Файл индекса не найден")
 
-    # Считываем файлы в память
+    # Собираем файлы
     files_data: list[tuple[str, bytes]] = []
     for upload in files:
         content = await upload.read()
         files_data.append((upload.filename, content))
 
-    background_tasks.add_task(
-        _train_embedding_from_bytes,
-        files_data,
-        db,
-        embedding_id,
-        chunk_size,
-        chunk_overlap,
-        True,
+    # Запускаем обновление в отдельном процессе
+    schedule_train_in_subprocess(
+        files_data,  # 1. list[tuple[str, bytes]]
+        embedding_id,  # 2. embedding_id
+        chunk_size,  # 3. chunk_size
+        chunk_overlap,  # 4. chunk_overlap
+        True,  # 5. append flag
     )
 
     return emb
