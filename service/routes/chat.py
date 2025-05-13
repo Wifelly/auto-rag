@@ -1,7 +1,7 @@
 import asyncio
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -201,7 +201,6 @@ async def respond(
 @router.get("/{chat_id}/respond-stream")
 async def respond_stream(
     chat_id: UUID,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     query: str = Query(..., description="Текст запроса"),
     embedding_ids: list[int] = Query(
@@ -224,13 +223,7 @@ async def respond_stream(
     if not await svc.get_session(chat_id):
         raise HTTPException(status_code=404, detail="Chat not found")
 
-    if use_web:
-        mode = Mode.WEB
-    elif use_rag:
-        mode = Mode.RAG
-    else:
-        mode = Mode.CHAT
-
+    mode = Mode.WEB if use_web else Mode.RAG if use_rag else Mode.CHAT
     buffer: list[str] = []
 
     async def event_generator():
@@ -252,14 +245,15 @@ async def respond_stream(
             await asyncio.sleep(0.01)
 
         full_response = "".join(buffer)
-        background_tasks.add_task(
-            svc.add_message,
+        await svc.add_message(
             chat_id,
             ChatRole.ASSISTANT,
             full_response,
             source=None,
             source_files=None,
         )
+
+        yield "event: done\ndata: complete\n\n"
 
     return StreamingResponse(
         event_generator(),
@@ -287,7 +281,6 @@ async def upload_files(
         status_id=1,
     )
 
-    # Читаем файлы в память
     files_data: list[tuple[str, bytes]] = []
     for upload in files:
         content = await upload.read()

@@ -1,5 +1,3 @@
-# service/tasks.py
-
 import asyncio
 import multiprocessing
 
@@ -37,10 +35,6 @@ def train_embeddings_process(
     chunk_overlap: int,
     append: bool,
 ):
-    """
-    Точка входа для процесса:
-    создаем свой loop и запускаем _run_training.
-    """
     loop = asyncio.new_event_loop()
     try:
         asyncio.set_event_loop(loop)
@@ -64,9 +58,6 @@ def schedule_train_in_subprocess(
     chunk_overlap: int,
     append: bool = False,
 ):
-    """
-    Пускаем обучение в отдельном процессе.
-    """
     p = multiprocessing.Process(
         target=train_embeddings_process,
         args=(files_data, embedding_id, chunk_size, chunk_overlap, append),

@@ -49,13 +49,11 @@ async def create_embedding(
     chunk_overlap: int = Form(200),
     db: AsyncSession = Depends(get_db),
 ):
-    # Собираем файлы
     files_data: list[tuple[str, bytes]] = []
     for upload in files:
         content = await upload.read()
         files_data.append((upload.filename, content))
 
-    # Создаём запись в БД
     svc = EmbeddingService(db)
     try:
         emb = await svc.create_embedding(
@@ -68,13 +66,12 @@ async def create_embedding(
         logger.exception(f"[CREATE EMBEDDING] {e}")
         raise HTTPException(500, f"Ошибка создания записи: {e}") from e
 
-    # Запускаем обучение в отдельном процессе (не передаём db или background_tasks)
     schedule_train_in_subprocess(
-        files_data,  # 1. list[tuple[str, bytes]]
-        emb.id,  # 2. embedding_id
-        chunk_size,  # 3. chunk_size
-        chunk_overlap,  # 4. chunk_overlap
-        False,  # 5. append flag
+        files_data,
+        emb.id,
+        chunk_size,
+        chunk_overlap,
+        False,
     )
 
     return emb
@@ -89,7 +86,6 @@ async def append_to_embedding(
     chunk_overlap: int = Form(200),
     db: AsyncSession = Depends(get_db),
 ):
-    # Проверяем права
     svc = EmbeddingService(db)
     emb = await svc.get_embedding_by_id(embedding_id)
     if not emb or emb.user_id != user_id:
@@ -99,19 +95,17 @@ async def append_to_embedding(
     if not embedding_manager.base_dir.joinpath(f"{emb.index_uid}.faiss").exists():
         raise HTTPException(404, "Файл индекса не найден")
 
-    # Собираем файлы
     files_data: list[tuple[str, bytes]] = []
     for upload in files:
         content = await upload.read()
         files_data.append((upload.filename, content))
 
-    # Запускаем обновление в отдельном процессе
     schedule_train_in_subprocess(
-        files_data,  # 1. list[tuple[str, bytes]]
-        embedding_id,  # 2. embedding_id
-        chunk_size,  # 3. chunk_size
-        chunk_overlap,  # 4. chunk_overlap
-        True,  # 5. append flag
+        files_data,
+        embedding_id,
+        chunk_size,
+        chunk_overlap,
+        True,
     )
 
     return emb
