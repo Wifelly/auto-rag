@@ -71,23 +71,21 @@ async def generate_quiz(req: QuizRequest):
         {
             "role": "user",
             "content": (
-                f"Сгенерируй {req.num_questions} контрольных вопросов "
-                f"(сложность: {req.difficulty}) по тексту:\n\n{req.text}\n"
-                "Верни ответ в формате JSON: "
-                '{"questions":[{"question":"...","options":["..."],"answer":"..."}]}'
+                f"Сгенерируй {req.num_questions} контрольных вопросов (сложность: {req.difficulty}) по тексту:\n\n{req.text}\n"
+                'Верни ответ в формате JSON: {"questions":[{"question":"...","options":["..."],"answer":"..."}]}'
             ),
         },
     ]
     try:
         result = await llm_service.call(messages=messages)
         resp = result.get("response")
-        if resp is None:
+        if not resp:
             raise ValueError("Empty response from LLM")
-        quiz_resp = QuizResponse.parse_raw(resp)
+        quiz_resp = QuizResponse.model_validate_json(resp)
     except ReadTimeout:
-        raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, "LLM service timeout")
+        raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="LLM service timeout")
     except Exception as err:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"LLM error: {err}") from err
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"LLM error: {err}")
 
     return quiz_resp
 
@@ -105,6 +103,12 @@ class QuizFromDocRequest(BaseModel):
     status_code=status.HTTP_200_OK,
     summary="Сгенерировать вопросы по контексту из документов",
 )
+@router.post(
+    "/quiz-from-doc",
+    response_model=QuizResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Сгенерировать вопросы по контексту из документов",
+)
 async def quiz_from_doc(
     req: QuizFromDocRequest,
     db: AsyncSession = Depends(get_db),
@@ -116,29 +120,28 @@ async def quiz_from_doc(
         min_score=0.0,
     )
     if not context_text:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Контекст не найден")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Контекст не найден")
 
     user_content = (
         f"Вот выдержки из документа:\n\n{context_text}\n\n"
-        f"Сгенерируй {req.num_questions} вопросов "
-        f"(сложность: {req.difficulty}) по этому материалу. "
-        "Верни JSON вида: "
-        '{"questions":[{"question":"...","options":["..."],"answer":"..."}]}'
+        f"Сгенерируй {req.num_questions} вопросов (сложность: {req.difficulty}) по этому материалу. "
+        'Верни JSON вида: {"questions":[{"question":"...","options":["..."],"answer":"..."}]}'
     )
     messages = [
         {"role": "system", "content": PromptBuilder.SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
     ]
+
     try:
         result = await llm_service.call(messages=messages)
         resp = result.get("response")
-        if resp is None:
+        if not resp:
             raise ValueError("Empty response from LLM")
-        quiz_resp = QuizResponse.parse_raw(resp)
+        quiz_resp = QuizResponse.model_validate_json(resp)
     except ReadTimeout:
-        raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, "LLM service timeout")
+        raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="LLM service timeout")
     except Exception as err:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"LLM error: {err}") from err
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"LLM error: {err}")
 
     return quiz_resp
 
@@ -165,8 +168,9 @@ async def evaluate(req: EvaluateRequest):
     user_msg = (
         f"Оцени ответ ученика на вопрос:\n{req.question}\n\n"
         f"Ответ ученика:\n{req.student_answer}\n\n"
-        f"Критерии оценки:\n- " + "\n- ".join(req.rubric) + "\n\nВерни JSON вида: "
-        '{"score": <число>, "max_score": <число>, "feedback": "..."}'
+        "Критерии оценки:\n- "
+        + "\n- ".join(req.rubric)
+        + '\n\nВерни JSON вида: {"score": <число>, "max_score": <число>, "feedback": "..."}'
     )
     messages = [
         {"role": "system", "content": PromptBuilder.SYSTEM_PROMPT},
@@ -175,13 +179,13 @@ async def evaluate(req: EvaluateRequest):
     try:
         result = await llm_service.call(messages=messages)
         resp = result.get("response")
-        if resp is None:
+        if not resp:
             raise ValueError("Empty response from LLM")
-        eval_resp = EvaluateResponse.parse_raw(resp)
+        eval_resp = EvaluateResponse.model_validate_json(resp)
     except ReadTimeout:
-        raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, "LLM service timeout")
+        raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="LLM service timeout")
     except Exception as err:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"LLM error: {err}") from err
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"LLM error: {err}")
 
     return eval_resp
 
