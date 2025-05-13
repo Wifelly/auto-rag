@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from service.clients.rag_service import Mode, rag_service
 from service.database.config import get_db
+from service.database.init_db import async_session_maker
 from service.database.models import ChatRole
 from service.services.chat_service import ChatService
 from service.services.document_pipeline import DocumentPipeline
@@ -245,13 +246,15 @@ async def respond_stream(
             await asyncio.sleep(0.01)
 
         full_response = "".join(buffer)
-        await svc.add_message(
-            chat_id,
-            ChatRole.ASSISTANT,
-            full_response,
-            source=None,
-            source_files=None,
-        )
+        async with async_session_maker() as new_db:
+            new_svc = ChatService(new_db)
+            await new_svc.add_message(
+                chat_id,
+                ChatRole.ASSISTANT,
+                full_response,
+                source=None,
+                source_files=None,
+            )
 
         yield "event: done\ndata: complete\n\n"
 
