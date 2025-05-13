@@ -1,10 +1,11 @@
 import asyncio
+import json
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
+from sse_starlette.sse import EventSourceResponse
 
 from service.clients.rag_service import Mode, rag_service
 from service.database.config import get_db
@@ -246,22 +247,38 @@ async def respond_stream(
             await asyncio.sleep(0.01)
 
         full_response = "".join(buffer)
+
+        result = await rag_service.answer_query(
+            query=query,
+            embedding_ids=embedding_ids,
+            db_session=db,
+            mode=mode,
+            top_k=top_k,
+            min_score=min_score,
+            use_web=use_web,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
+            stop=stop,
+        )
+        source = result["meta"].get("source")
+        files = result["meta"].get("files")
+
         async with async_session_maker() as new_db:
             new_svc = ChatService(new_db)
             await new_svc.add_message(
                 chat_id,
                 ChatRole.ASSISTANT,
                 full_response,
-                source=None,
-                source_files=None,
+                source=source,
+                source_files=files,
             )
+
+        yield f"event: metadata\ndata: {json.dumps({'source': source, 'files': files})}\n\n"
 
         yield "event: done\ndata: complete\n\n"
 
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-    )
+    return EventSourceResponse(event_generator())
 
 
 @router.post("/{chat_id}/upload-file", response_model=list[ChatMessageResponse])
