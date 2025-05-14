@@ -84,7 +84,14 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
 class RequestBodyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         if request.method == "POST":
-            request.state.request_body = await request.json()
+            content_type = request.headers.get("content-type", "")
+            if content_type.startswith("application/json"):
+                try:
+                    request.state.request_body = await request.json()
+                except Exception:
+                    request.state.request_body = None
+            else:
+                request.state.request_body = None
         return await call_next(request)
 
 
