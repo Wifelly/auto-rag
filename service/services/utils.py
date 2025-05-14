@@ -5,12 +5,13 @@ import json
 import re
 from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
+from io import BytesIO
 from pathlib import Path
 
 import aiofiles
 import httpx
 
-from service.service.logger import logger
+from service.monitoring.logger import logger
 
 SUPPORTED_EXTENSIONS = (".pdf", ".docx", ".pptx")
 DEFAULT_HASHES_FILE = "file_hashes.json"
@@ -101,6 +102,41 @@ class Utils:
             response = await client.get(url)
             response.raise_for_status()
             return response.text
+
+    @staticmethod
+    async def extract_text_from_bytes(filename: str, content: bytes) -> str:
+        from docx import Document as DocxDocument
+        from fitz import open as fitz_open
+        from pptx import Presentation
+
+        ext = Path(filename).suffix.lower()
+
+        try:
+            if ext == ".docx":
+                doc = DocxDocument(BytesIO(content))
+                return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+
+            elif ext == ".pptx":
+                prs = Presentation(BytesIO(content))
+                return "\n".join(
+                    shape.text
+                    for slide in prs.slides
+                    for shape in slide.shapes
+                    if hasattr(shape, "text") and shape.text.strip()
+                )
+
+            elif ext == ".pdf":
+                doc = fitz_open(stream=content, filetype="pdf")
+                return "\n".join(page.get_text() for page in doc)
+
+            elif ext == ".txt":
+                return content.decode("utf-8", errors="ignore")
+
+            else:
+                raise ValueError(f"Неподдерживаемый формат файла: {ext}")
+        except Exception as e:
+            logger.error(f"Ошибка обработки файла {filename}: {e}")
+            return ""
 
 
 __all__ = ["Utils", "SUPPORTED_EXTENSIONS", "MAX_TEXT_SIZE"]
